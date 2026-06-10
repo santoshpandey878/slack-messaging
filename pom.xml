@@ -25,6 +25,7 @@
         <module>message-service</module>
         <module>media-service</module>
         <module>ws-gateway</module>
+        <module>api-gateway</module>
     </modules>
 
     <properties>

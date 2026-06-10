@@ -1,0 +1,25 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+# Service URLs for routing
+services:
+  auth-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+  channel-url: ${CHANNEL_SERVICE_URL:http://localhost:8082}
+  message-url: ${MESSAGE_SERVICE_URL:http://localhost:8083}
+  media-url: ${MEDIA_SERVICE_URL:http://localhost:8084}
+  ws-url: ${WS_GATEWAY_URL:http://localhost:8085}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    root: INFO
+    com.slackmsg: ${LOG_LEVEL:DEBUG}

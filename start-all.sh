@@ -9,7 +9,7 @@ MVN="/Users/santosh.pandey/apache-maven-3.8.6/bin/mvn"
 $MVN compile -q || { echo "Build failed"; exit 1; }
 
 # Start each service in background
-for MODULE in auth-service channel-service message-service media-service ws-gateway; do
+for MODULE in auth-service channel-service message-service media-service ws-gateway api-gateway; do
   echo "Starting $MODULE..."
   $MVN spring-boot:run -pl $MODULE -q &
   sleep 3
