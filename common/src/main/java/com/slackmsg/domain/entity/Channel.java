@@ -46,4 +46,11 @@ public class Channel {
     @Builder.Default
     @Column(name = "updated_at")
     private Instant updatedAt = Instant.now();
+
+    // Channel metadata
+    @Column(columnDefinition = "TEXT")
+    private String topic;
+
+    @Column(columnDefinition = "TEXT")
+    private String description;
 }

@@ -43,4 +43,14 @@ public class User {
     @Builder.Default
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
+
+    // Profile fields
+    @Column(name = "avatar_url")
+    private String avatarUrl;
+
+    @Column(name = "status_text")
+    private String statusText;
+
+    @Column(name = "timezone")
+    private String timezone;
 }

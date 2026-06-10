@@ -37,6 +37,15 @@ public class ChannelMember {
     @Column(name = "last_read_at")
     private Instant lastReadAt;
 
+    // Notification preferences per member per channel
+    @Builder.Default
+    @Column(name = "muted")
+    private Boolean muted = false;
+
+    @Builder.Default
+    @Column(name = "notification_level")
+    private String notificationLevel = "default";
+
     @Data @NoArgsConstructor @AllArgsConstructor
     public static class ChannelMemberId implements Serializable {
         private UUID channelId;

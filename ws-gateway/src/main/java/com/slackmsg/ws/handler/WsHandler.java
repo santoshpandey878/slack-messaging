@@ -22,7 +22,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * WebSocket handler — thin orchestrator.
- * Delegates: session mgmt → WsSessionManager, message building → WsPayloadBuilder.
+ * Delegates: session mgmt -> WsSessionManager, message building -> WsPayloadBuilder.
+ *
+ * Supports ANY event type via the generic envelope:
+ * { "type": "...", "tenantId": "...", "channelId": "...", "data": {...} }
+ *
+ * Channel-scoped events: delivered to channel members only.
+ * Tenant-scoped events (channelId=null): delivered to all online tenant users.
  */
 @Component
 @RequiredArgsConstructor
@@ -118,9 +124,16 @@ public class WsHandler extends TextWebSocketHandler {
                     JsonNode json = objectMapper.readTree(message);
                     String targetTenantId = json.path("tenantId").asText("");
                     String targetChannelId = json.path("channelId").asText("");
-                    if (targetChannelId.isEmpty()) return;
 
-                    deliverToLocalMembers(targetTenantId, targetChannelId, message);
+                    if (targetTenantId.isEmpty()) return;
+
+                    if (targetChannelId.isEmpty() || "null".equals(targetChannelId)) {
+                        // Tenant-scoped event (e.g., presence) — deliver to all tenant sessions
+                        deliverToTenantMembers(targetTenantId, message);
+                    } else {
+                        // Channel-scoped event — deliver to channel members only
+                        deliverToChannelMembers(targetTenantId, targetChannelId, message);
+                    }
                 } catch (Exception e) {
                     log.error("Pub/Sub error: {}", e.getMessage());
                 }
@@ -129,7 +142,7 @@ public class WsHandler extends TextWebSocketHandler {
         }
     }
 
-    private void deliverToLocalMembers(String tenantId, String channelId, String message) {
+    private void deliverToChannelMembers(String tenantId, String channelId, String message) {
         for (Map.Entry<String, WebSocketSession> entry : sessionManager.getAllSessions().entrySet()) {
             String userKey = entry.getKey();
             WebSocketSession session = entry.getValue();
@@ -144,6 +157,17 @@ public class WsHandler extends TextWebSocketHandler {
             } catch (Exception e) {
                 log.debug("Delivery check failed: user={} channel={}", userId, channelId);
             }
+        }
+    }
+
+    private void deliverToTenantMembers(String tenantId, String message) {
+        for (Map.Entry<String, WebSocketSession> entry : sessionManager.getAllSessions().entrySet()) {
+            String userKey = entry.getKey();
+            WebSocketSession session = entry.getValue();
+
+            if (!session.isOpen() || !userKey.startsWith(tenantId + ":")) continue;
+
+            send(session, message);
         }
     }
 

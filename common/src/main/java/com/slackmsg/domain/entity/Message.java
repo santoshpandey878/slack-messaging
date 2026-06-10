@@ -55,4 +55,16 @@ public class Message {
 
     @Column(name = "idempotency_key")
     private String idempotencyKey;
+
+    // Thread support (nullable — null means top-level message)
+    @Column(name = "parent_message_id")
+    private UUID parentMessageId;
+
+    @Builder.Default
+    @Column(name = "reply_count")
+    private Integer replyCount = 0;
+
+    // Edit support (nullable — null means never edited)
+    @Column(name = "edited_at")
+    private Instant editedAt;
 }

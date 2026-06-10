@@ -1,17 +1,14 @@
 package com.slackmsg.client;
 
-import com.slackmsg.util.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.List;
-import java.util.Map;
-
 /**
  * Base REST client for inter-service communication.
  * Each service creates typed clients extending this.
+ * Supports GET, POST, PUT, PATCH, DELETE.
  */
 @Slf4j
 public abstract class ServiceClient {
@@ -40,13 +37,46 @@ public abstract class ServiceClient {
     protected <T> T post(String path, Object body, Class<T> responseType) {
         String url = baseUrl + path;
         log.debug("Service call: POST {}", url);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<Object> entity = new HttpEntity<>(body, headers);
+        HttpEntity<Object> entity = jsonEntity(body);
         return restTemplate.postForObject(url, entity, responseType);
+    }
+
+    protected <T> T put(String path, Object body, Class<T> responseType) {
+        String url = baseUrl + path;
+        log.debug("Service call: PUT {}", url);
+        HttpEntity<Object> entity = jsonEntity(body);
+        ResponseEntity<T> response = restTemplate.exchange(url, HttpMethod.PUT, entity, responseType);
+        return response.getBody();
+    }
+
+    protected <T> T patch(String path, Object body, Class<T> responseType) {
+        String url = baseUrl + path;
+        log.debug("Service call: PATCH {}", url);
+        HttpEntity<Object> entity = jsonEntity(body);
+        ResponseEntity<T> response = restTemplate.exchange(url, HttpMethod.PATCH, entity, responseType);
+        return response.getBody();
+    }
+
+    protected void delete(String path) {
+        String url = baseUrl + path;
+        log.debug("Service call: DELETE {}", url);
+        restTemplate.delete(url);
+    }
+
+    protected <T> T delete(String path, Class<T> responseType) {
+        String url = baseUrl + path;
+        log.debug("Service call: DELETE {}", url);
+        ResponseEntity<T> response = restTemplate.exchange(url, HttpMethod.DELETE, null, responseType);
+        return response.getBody();
     }
 
     protected String getBaseUrl() {
         return baseUrl;
+    }
+
+    private HttpEntity<Object> jsonEntity(Object body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new HttpEntity<>(body, headers);
     }
 }
