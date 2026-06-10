@@ -39,8 +39,9 @@ app:
   rate-limit:
     tenant-per-second: 100
     user-per-second: 10
+  ws:
+    allowed-origins: ${WS_ALLOWED_ORIGINS:http://localhost:8080,http://localhost:3000}
 
-# Inter-service URLs
 services:
   auth-url: ${AUTH_SERVICE_URL:http://localhost:8081}
   channel-url: ${CHANNEL_SERVICE_URL:http://localhost:8082}
@@ -58,7 +59,3 @@ logging:
   level:
     root: INFO
     com.slackmsg: ${LOG_LEVEL:DEBUG}
-
-app:
-  ws:
-    allowed-origins: ${WS_ALLOWED_ORIGINS:http://localhost:8080,http://localhost:3000}
