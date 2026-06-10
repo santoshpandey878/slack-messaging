@@ -1,6 +1,8 @@
 version: '3.8'
 
 services:
+  # ═══ INFRASTRUCTURE ═══
+
   postgres:
     image: postgres:14-alpine
     container_name: slack-postgres
@@ -45,7 +47,6 @@ services:
     volumes:
       - miniodata:/data
 
-  # Create default bucket on startup
   minio-init:
     image: minio/mc:latest
     depends_on:
@@ -58,6 +59,156 @@ services:
       mc anonymous set download local/slack-media;
       echo 'Bucket created';
       "
+
+  # ═══ APPLICATION SERVICES ═══
+
+  auth-service:
+    build: ./auth-service
+    container_name: slack-auth
+    ports:
+      - "8081:8081"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/slackmsg
+      DB_USERNAME: slackuser
+      DB_PASSWORD: slackpass
+      REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET:-s3cr3t-k3y-f0r-sl4ck-m3ss4g1ng-syst3m-ch4ng3-1n-pr0d}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  channel-service:
+    build: ./channel-service
+    container_name: slack-channel
+    ports:
+      - "8082:8082"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/slackmsg
+      DB_USERNAME: slackuser
+      DB_PASSWORD: slackpass
+      REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET:-s3cr3t-k3y-f0r-sl4ck-m3ss4g1ng-syst3m-ch4ng3-1n-pr0d}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  message-service:
+    build: ./message-service
+    container_name: slack-message
+    ports:
+      - "8083:8083"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/slackmsg
+      DB_USERNAME: slackuser
+      DB_PASSWORD: slackpass
+      REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET:-s3cr3t-k3y-f0r-sl4ck-m3ss4g1ng-syst3m-ch4ng3-1n-pr0d}
+      CHANNEL_SERVICE_URL: http://channel-service:8082
+    depends_on:
+      channel-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  media-service:
+    build: ./media-service
+    container_name: slack-media
+    ports:
+      - "8084:8084"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/slackmsg
+      DB_USERNAME: slackuser
+      DB_PASSWORD: slackpass
+      REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET:-s3cr3t-k3y-f0r-sl4ck-m3ss4g1ng-syst3m-ch4ng3-1n-pr0d}
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8084/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ws-gateway:
+    build: ./ws-gateway
+    container_name: slack-ws
+    ports:
+      - "8085:8085"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/slackmsg
+      DB_USERNAME: slackuser
+      DB_PASSWORD: slackpass
+      REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET:-s3cr3t-k3y-f0r-sl4ck-m3ss4g1ng-syst3m-ch4ng3-1n-pr0d}
+      CHANNEL_SERVICE_URL: http://channel-service:8082
+      MESSAGE_SERVICE_URL: http://message-service:8083
+    depends_on:
+      channel-service:
+        condition: service_healthy
+      message-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  api-gateway:
+    build: ./api-gateway
+    container_name: slack-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:8081
+      CHANNEL_SERVICE_URL: http://channel-service:8082
+      MESSAGE_SERVICE_URL: http://message-service:8083
+      MEDIA_SERVICE_URL: http://media-service:8084
+      WS_GATEWAY_URL: http://ws-gateway:8085
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      channel-service:
+        condition: service_healthy
+      message-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+      ws-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   pgdata:
