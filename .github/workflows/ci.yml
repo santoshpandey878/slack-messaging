@@ -1,0 +1,84 @@
+name: CI — Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:14-alpine
+        env:
+          POSTGRES_DB: slackmsg
+          POSTGRES_USER: slackuser
+          POSTGRES_PASSWORD: slackpass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'corretto'
+
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-
+
+      - name: Build all modules
+        run: mvn compile -q
+
+      - name: Install common module
+        run: |
+          mvn install -N -q
+          mvn install -pl common -q
+
+      - name: Run unit tests
+        run: mvn test -pl common,auth-service,channel-service,message-service,media-service,ws-gateway
+
+      - name: Start services & run E2E
+        run: |
+          # Start services in background
+          for SVC in auth-service channel-service message-service media-service ws-gateway api-gateway; do
+            mvn spring-boot:run -pl $SVC -q &
+            sleep 8
+          done
+          sleep 5
+
+          # Health check
+          for PORT in 8080 8081 8082 8083 8084 8085; do
+            curl -sf http://localhost:$PORT/actuator/health || echo "WARN: $PORT not healthy"
+          done
+
+          # Run E2E test
+          chmod +x test-e2e.sh
+          ./test-e2e.sh
+
+          # Cleanup
+          pkill -f "spring-boot:run" || true
