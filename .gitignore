@@ -28,3 +28,8 @@ logs/
 .mvn/
 mvnw
 mvnw.cmd
+
+# CD Watcher
+logs/
+.cd-watcher.pid
+.cd-deploying
