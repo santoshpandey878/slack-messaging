@@ -450,34 +450,115 @@ check "$REACTION" "Add reaction"
 
 Add UI elements for the new feature following existing patterns in the HTML.
 
-### Step 14: Build, Deploy, Verify
+### Step 14: Build & Run Unit Tests
 
 ```bash
-# Build
+export JAVA_HOME=$(/usr/libexec/java_home -v 11)
+export PATH="/Users/santosh.pandey/apache-maven-3.8.6/bin:$PATH"
+
+# Build all modules
 mvn install -N -q && mvn install -pl common -q && mvn package -DskipTests -q
 
-# Run unit tests
+# Run unit tests — ALL must pass before proceeding
 mvn test
+```
 
-# Deploy (clean start if migration changed)
+**If tests fail:** Fix the issue. Do NOT proceed to commit with failing tests.
+
+### Step 15: Commit & Push to GitHub
+
+```bash
+# Stage all changes
+git add -A
+
+# Commit with descriptive message
+git commit -m "Add: {feature name}
+
+- {what was added: endpoints, entities, migrations}
+- {tests: N unit tests added}
+- {WS events: event types used}
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+
+# Push to main
+git push origin main
+```
+
+**Commit message rules:**
+- Start with `Add:` for new features, `Fix:` for bugs, `Update:` for enhancements
+- List what changed (endpoints, entities, migrations, tests)
+- Always include `Co-Authored-By` line
+
+### Step 16: Deploy to Docker & Verify
+
+```bash
+# If new migration was added (new table/column): clean deploy
 docker-compose down -v && docker-compose build --quiet && docker-compose up -d
 
-# Wait for health
-sleep 30
-for PORT in 8080 8081 8082 8083 8084 8085; do
-  curl -s -m 5 "http://localhost:$PORT/actuator/health" | python3 -c "import sys,json; print(':$PORT →', json.load(sys.stdin).get('status','DOWN'))" 2>/dev/null
+# If no migration change: quick redeploy
+docker-compose build --quiet && docker-compose up -d
+
+# Wait for all services to be healthy (up to 60s)
+echo "Waiting for services..."
+for i in 1 2 3 4 5 6; do
+  sleep 10
+  ALL_UP=true
+  for PORT in 8080 8081 8082 8083 8084 8085; do
+    STATUS=$(curl -s -m 3 "http://localhost:$PORT/actuator/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "DOWN")
+    [ "$STATUS" != "UP" ] && ALL_UP=false
+  done
+  if [ "$ALL_UP" = "true" ]; then break; fi
+  echo "  Attempt $i/6..."
 done
 
-# Run E2E
+# Print final health status
+for PORT in 8080 8081 8082 8083 8084 8085; do
+  STATUS=$(curl -s -m 3 "http://localhost:$PORT/actuator/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "DOWN")
+  echo "  :$PORT → $STATUS"
+done
+```
+
+**ALL 6 services must show UP.** If any service is DOWN, check logs: `docker-compose logs {service-name}`
+
+### Step 17: Run E2E Tests & Verify Feature
+
+```bash
+# Run existing E2E suite (must pass — no regressions)
 ./test-e2e.sh
+
+# Manually test the new feature with curl
+# Example: testing a new reaction endpoint
+TOKEN=$(curl -s http://localhost:8081/api/v1/auth/register -H 'Content-Type: application/json' \
+  -d '{"tenantName":"Test","tenantSlug":"test-'$(date +%s)'","email":"a@t.com","displayName":"Admin","password":"pass123"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
+
+# Test the new endpoint
+curl -s http://localhost:8080/api/v1/{your-new-endpoint} \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{...}' | python3 -m json.tool
+```
+
+**If E2E fails:** Fix the regression, re-run unit tests, commit, push, redeploy, re-test. Do NOT leave a broken state.
+
+### Step 18: Verify on GitHub
+
+```bash
+# Confirm push landed
+git log --oneline -1
+# Should match your commit
+
+# Confirm CI passes (if GitHub Actions is configured)
+# The CD watcher (if running) will auto-detect the push and redeploy
 ```
 
 ---
 
 ## Post-Build Quality Checklist
 
-After implementing a feature, verify ALL of these:
+After implementing a feature, verify ALL of these BEFORE committing:
 
+### Code Quality
 - [ ] **Tenant isolation:** All queries include `tenant_id`
 - [ ] **Authorization:** Membership/admin checked for every operation
 - [ ] **Validation:** All inputs validated (required fields, size limits, format)
@@ -489,7 +570,26 @@ After implementing a feature, verify ALL of these:
 - [ ] **Transaction scope:** No REST/Redis calls inside DB transaction
 - [ ] **Null safety:** All nullable fields handled
 - [ ] **Logging:** One INFO log per public method call
-- [ ] **Tests pass:** Unit tests + E2E tests
 - [ ] **No hardcoded keys:** Redis keys use `RedisKeys.*` methods
 - [ ] **Response format:** `ApiResponse<T>` wrapper, `@JsonInclude(NON_NULL)`
 - [ ] **Pagination:** Limit clamped to [1, 100] for list endpoints
+
+### Pipeline
+- [ ] **Unit tests pass:** `mvn test` — 0 failures
+- [ ] **Committed:** `git add -A && git commit`
+- [ ] **Pushed:** `git push origin main`
+- [ ] **Docker deployed:** `docker-compose build && up -d`
+- [ ] **All 6 services healthy:** health check on ports 8080-8085
+- [ ] **E2E tests pass:** `./test-e2e.sh` — 0 failures
+- [ ] **New feature manually verified:** curl test against the new endpoint
+- [ ] **No regressions:** existing E2E checks still pass
+
+### Definition of Done
+A feature is COMPLETE only when:
+1. Code is written following all quality standards
+2. Unit tests written and passing
+3. Committed and pushed to GitHub (main branch)
+4. Docker containers rebuilt and deployed
+5. All services healthy
+6. E2E tests pass (including new test cases for the feature)
+7. Feature manually verified via curl or demo UI

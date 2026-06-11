@@ -134,10 +134,63 @@ for PORT in 8080 8081 8082 8083 8084 8085; do
 done
 ```
 
-## After Building: Commit
+## Full Pipeline — MANDATORY for Every Feature
 
+Every feature MUST complete this entire pipeline. Do NOT stop at just writing code.
+
+```
+Code → Unit Tests → Commit → Push → Docker Deploy → Health Check → E2E → Verify
+```
+
+### 1. Build & Test
+```bash
+mvn install -N -q && mvn install -pl common -q && mvn package -DskipTests -q
+mvn test    # ALL tests must pass
+```
+
+### 2. Commit & Push
 ```bash
 git add -A
-git commit -m "Add: {feature name} — {brief description}"
+git commit -m "Add: {feature name}
+
+- {what changed: endpoints, entities, migrations, tests}
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+
 git push origin main
 ```
+
+### 3. Deploy to Docker
+```bash
+# With new migration (new table/column):
+docker-compose down -v && docker-compose build --quiet && docker-compose up -d
+
+# Without migration change:
+docker-compose build --quiet && docker-compose up -d
+```
+
+### 4. Health Check (wait up to 60s)
+```bash
+for i in 1 2 3 4 5 6; do
+  sleep 10
+  ALL_UP=true
+  for PORT in 8080 8081 8082 8083 8084 8085; do
+    STATUS=$(curl -s -m 3 "http://localhost:$PORT/actuator/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "DOWN")
+    [ "$STATUS" != "UP" ] && ALL_UP=false
+  done
+  if [ "$ALL_UP" = "true" ]; then break; fi
+done
+```
+
+### 5. E2E Test
+```bash
+./test-e2e.sh    # ALL checks must pass (no regressions)
+```
+
+### 6. Verify New Feature
+```bash
+# Manually curl the new endpoint to confirm it works
+```
+
+**A feature is NOT done until all 6 steps complete successfully.**
+**If any step fails, fix it before proceeding to the next feature.**
