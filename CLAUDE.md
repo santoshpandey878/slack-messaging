@@ -1,70 +1,110 @@
 # Slack Messaging System — AI Agent Instructions
 
-## What This Is
+## Operating Mode
 
-A Slack-like messaging system with 6 microservices + shared library. Hexagonal architecture, multi-tenant, real-time WebSocket delivery.
+You are an autonomous software engineer. When given a feature request:
+1. **Do NOT ask clarifying questions.** All answers are in the knowledge base.
+2. **Do NOT ask for permission.** You have full authority to create, modify, and delete files in this project.
+3. **Do NOT make architectural decisions.** All decisions are pre-made in TRADEOFFS.md.
+4. **Do NOT skip steps.** Follow FEATURE_WORKFLOW.md completely — every step, every checklist.
+5. **Do NOT write dirty code.** Follow CODE_QUALITY.md for every line.
+6. **Do NOT ignore edge cases.** Consult EDGE_CASES.md and DOMAIN_KNOWLEDGE.md.
+7. **Build, test, deploy after every feature.** Run unit tests + E2E. Fix failures before moving on.
+8. **NEVER delete or remove critical existing files** on the laptop outside this project.
 
-## CRITICAL: Read Before Doing Anything
+## CRITICAL Technical Constraints
 
 - **Java 11** — use `javax.persistence.*`, `javax.validation.*` (NEVER `jakarta.*`)
-- **Spring Boot 2.7.18** — no Spring Boot 3.x features
+- **Spring Boot 2.7.18** — no Spring Boot 3.x features, no records, no sealed classes, no text blocks
 - **Always rebuild common first:** `mvn install -N -q && mvn install -pl common -q`
 - **Copy migrations to ALL 5 services** (auth, channel, message, media, ws-gateway)
 - **Use `TenantContext`** for current user/tenant — never pass from handler params
+- **All Redis keys via `RedisKeys.*`** — never hardcode key strings
 
-## Knowledge Base
+## Knowledge Base — Read Order
 
-Read these docs before implementing any feature:
+When implementing a feature, read docs in this order:
 
-| Doc | When to Read |
-|-----|-------------|
-| [docs/FEATURE_WORKFLOW.md](docs/FEATURE_WORKFLOW.md) | **ALWAYS — step-by-step cookbook for adding ANY feature** |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Understanding system structure, service boundaries |
-| [docs/DATABASE.md](docs/DATABASE.md) | Adding tables, columns, migrations |
-| [docs/API_DESIGN.md](docs/API_DESIGN.md) | Adding REST endpoints |
-| [docs/WEBSOCKET.md](docs/WEBSOCKET.md) | Adding real-time events |
-| [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | Coding patterns, naming, file locations |
-| [docs/SECURITY.md](docs/SECURITY.md) | Auth, tenant isolation, rate limiting |
-| [docs/TESTING.md](docs/TESTING.md) | Building, deploying, testing |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, CI/CD, environment |
+### 1. Understand the Domain
+| Doc | What You Learn |
+|-----|---------------|
+| [docs/DOMAIN_KNOWLEDGE.md](docs/DOMAIN_KNOWLEDGE.md) | What the feature IS, how Slack does it, exact behaviors, edge cases per feature |
 
-## Quick Start: Adding a Feature
+### 2. Know the Rules
+| Doc | What You Learn |
+|-----|---------------|
+| [docs/TRADEOFFS.md](docs/TRADEOFFS.md) | Pre-decided: consistency/availability, caching, pagination, auth model, transactions, delivery semantics |
+| [docs/CODE_QUALITY.md](docs/CODE_QUALITY.md) | Method limits, null safety, exception rules, logging, anti-patterns, performance rules |
+| [docs/EDGE_CASES.md](docs/EDGE_CASES.md) | Race conditions, null data, deletion cascades, security, pagination, WS edge cases, failure scenarios |
+| [docs/ERROR_HANDLING.md](docs/ERROR_HANDLING.md) | Exception hierarchy, fan-out error pattern, inter-service failure handling, graceful degradation |
 
-1. Read `docs/FEATURE_WORKFLOW.md` — follow the 11 steps
-2. Identify which service owns the feature (see ARCHITECTURE.md)
-3. Create migration → entity → repository → DTO → service → handler → WS event → test
-4. Build: `mvn install -pl common -q && mvn package -DskipTests -q`
-5. Deploy: `docker-compose build --quiet && docker-compose up -d`
-6. Test: `./test-e2e.sh`
+### 3. Build the Feature
+| Doc | What You Learn |
+|-----|---------------|
+| [docs/FEATURE_WORKFLOW.md](docs/FEATURE_WORKFLOW.md) | **The 14-step cookbook.** Pre-flight checklist → migration → entity → repo → DTO → service → handler → route → WS event → internal API → tests → E2E → UI → deploy |
+
+### 4. Reference (as needed)
+| Doc | What You Learn |
+|-----|---------------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System overview, hexagonal layers, service boundaries, message delivery flow |
+| [docs/DATABASE.md](docs/DATABASE.md) | Full schema (9 tables), all columns, indexes, migration guide |
+| [docs/API_DESIGN.md](docs/API_DESIGN.md) | All current endpoints, REST conventions, response format, routing |
+| [docs/WEBSOCKET.md](docs/WEBSOCKET.md) | 18 event types, delivery pipeline, how to add events in 3 steps |
+| [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | Package structure, naming, file locations, imports |
+| [docs/SECURITY.md](docs/SECURITY.md) | JWT, tenant isolation, rate limiting, BCrypt, public paths |
+| [docs/TESTING.md](docs/TESTING.md) | Build/deploy/test cycle, E2E patterns |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, Colima, CI/CD, environment variables |
 
 ## Service Ownership
 
-| Feature | Service | Port |
-|---------|---------|------|
-| Users, auth, profiles | auth-service | 8081 |
-| Channels, DMs, membership | channel-service | 8082 |
+| Feature Area | Service | Port |
+|-------------|---------|------|
+| Auth, users, profiles | auth-service | 8081 |
+| Channels, DMs, membership, topic | channel-service | 8082 |
 | Messages, threads, reactions, pins, search, unread | message-service | 8083 |
 | File uploads | media-service | 8084 |
-| WebSocket connections | ws-gateway | 8085 |
-| Reverse proxy, routing | api-gateway | 8080 |
+| WebSocket, typing, presence | ws-gateway | 8085 |
+| Reverse proxy, routing, demo UI | api-gateway | 8080 |
 
-## Pre-Built Infrastructure (Ready to Use)
+## Pre-Built Infrastructure (Use Before Creating New)
 
-These are already built — just add service logic + endpoints:
+**DB columns (V4 migration — already exist):**
+- `messages`: parent_message_id, reply_count, edited_at
+- `channels`: topic, description
+- `users`: avatar_url, status_text, timezone
+- `channel_members`: muted, notification_level
 
-- **Thread columns:** `messages.parent_message_id`, `messages.reply_count` (V4 migration)
-- **Edit column:** `messages.edited_at` (V4 migration)
-- **Channel metadata:** `channels.topic`, `channels.description` (V4 migration)
-- **User profile:** `users.avatar_url`, `users.status_text`, `users.timezone` (V4 migration)
-- **Notification prefs:** `channel_members.muted`, `channel_members.notification_level` (V4 migration)
-- **Reactions table:** `reactions` with unique(message_id, user_id, emoji) (V4 migration)
-- **Pinned messages table:** `pinned_messages` with unique(channel_id, message_id) (V4 migration)
-- **Starred items table:** `starred_items` with unique(user_id, item_type, item_id) (V4 migration)
-- **Entities:** `Reaction.java`, `PinnedMessage.java`, `StarredItem.java` in common
-- **WS Event Types:** 18 types in `WsEventType.java` enum
-- **WS Payload Builders:** Pre-built for message.new/edited/deleted, thread.reply, reaction.added/removed, typing, presence, channel.updated, member.joined/left, pin, read.receipt
-- **Generic Fan-out:** `FanoutService.fanoutEvent()` (channel-scoped), `fanoutToTenant()` (tenant-scoped)
-- **ServiceClient:** GET, POST, PUT, PATCH, DELETE for inter-service calls
+**Tables (V4 migration — already exist):**
+- `reactions` (message_id, user_id, emoji) with unique constraint
+- `pinned_messages` (channel_id, message_id) with unique constraint
+- `starred_items` (user_id, item_type, item_id) with unique constraint
+
+**Entities (already exist in common/):**
+- Reaction.java, PinnedMessage.java, StarredItem.java
+
+**WS Event Types (WsEventType enum — 18 types pre-defined):**
+- message.new, message.edited, message.deleted, thread.reply
+- reaction.added, reaction.removed
+- typing.start, typing.stop
+- presence.change
+- channel.updated, channel.archived
+- member.joined, member.left
+- pin.added, pin.removed
+- read.receipt
+
+**WS Payload Builders (WsPayloadBuilder — all pre-built):**
+- buildMessageNew, buildMessageEdited, buildMessageDeleted
+- buildThreadReply, buildReactionAdded, buildReactionRemoved
+- buildTypingStart, buildPresenceChange
+- buildChannelUpdated, buildMemberJoined, buildMemberLeft
+- buildPinAdded, buildReadReceipt
+
+**Fan-out (FanoutService — generic methods):**
+- `fanoutEvent(tenantId, channelId, payload, excludeUserId, trackUnread)` — channel-scoped
+- `fanoutToTenant(tenantId, payload, excludeUserId)` — tenant-wide (presence)
+
+**ServiceClient (base class with all HTTP methods):**
+- GET, POST, PUT, PATCH, DELETE
 
 ## Build Commands
 
@@ -72,18 +112,32 @@ These are already built — just add service logic + endpoints:
 export JAVA_HOME=$(/usr/libexec/java_home -v 11)
 export PATH="/Users/santosh.pandey/apache-maven-3.8.6/bin:$PATH"
 
-# Compile all
-mvn install -N -q && mvn install -pl common -q && mvn compile
+# Build all
+mvn install -N -q && mvn install -pl common -q && mvn package -DskipTests -q
 
-# Package all
-mvn package -DskipTests -q
+# Run unit tests
+mvn test
 
-# Deploy
+# Deploy (clean, for migration changes)
+docker-compose down -v && docker-compose build --quiet && docker-compose up -d
+
+# Deploy (quick, no migration changes)
 docker-compose build --quiet && docker-compose up -d
 
-# Test
+# E2E test
 ./test-e2e.sh
 
-# Full reset (wipes DB)
-docker-compose down -v && docker-compose up -d
+# Health check
+for PORT in 8080 8081 8082 8083 8084 8085; do
+  STATUS=$(curl -s -m 5 "http://localhost:$PORT/actuator/health" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','DOWN'))" 2>/dev/null || echo "DOWN")
+  echo ":$PORT → $STATUS"
+done
+```
+
+## After Building: Commit
+
+```bash
+git add -A
+git commit -m "Add: {feature name} — {brief description}"
+git push origin main
 ```

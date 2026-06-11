@@ -1,55 +1,85 @@
-# Feature Workflow — How to Add Any Feature
+# Feature Workflow — Complete Autonomous Build Guide
 
-This is the step-by-step cookbook for adding any Slack feature. Follow these steps in order. No architecture decisions needed — just follow the pattern.
+This document contains EVERYTHING needed to build any feature without asking questions. Follow every step. Skip nothing.
 
-## Quick Reference: Which Service Owns What
+---
 
-| Feature Area | Service | Handler File |
-|-------------|---------|-------------|
-| Auth, users, profiles | auth-service | `AuthHandler.java`, `UserHandler.java` |
-| Channels, DMs, membership | channel-service | `ChannelHandler.java` |
-| Messages, threads, reactions, pins, search | message-service | `MessageHandler.java` |
-| File uploads | media-service | `MediaHandler.java` |
-| Real-time events | ws-gateway | `WsHandler.java` |
-| Routing | api-gateway | `ServiceRoutes.java` |
+## Before You Start: Pre-Flight Checklist
 
-## Step-by-Step: Adding a New Feature
+Before writing any code for a new feature:
 
-### Step 1: Database (if persistent data needed)
+1. **Read DOMAIN_KNOWLEDGE.md** — understand what the feature IS, how Slack does it, edge cases
+2. **Read TRADEOFFS.md** — every architectural decision is pre-made, follow them
+3. **Read CODE_QUALITY.md** — quality standards, anti-patterns, validation rules
+4. **Read EDGE_CASES.md** — race conditions, null handling, failure scenarios
+5. **Identify the owning service** (see table below)
+6. **Check if DB columns/tables already exist** in V4 migration (many are pre-built)
+7. **Check if WS event type already exists** in WsEventType enum
+8. **Check if WsPayloadBuilder method already exists**
+
+### Service Ownership
+
+| Feature Area | Service | Port |
+|-------------|---------|------|
+| Auth, users, profiles | auth-service | 8081 |
+| Channels, DMs, membership, topic | channel-service | 8082 |
+| Messages, threads, reactions, pins, search, unread | message-service | 8083 |
+| File uploads | media-service | 8084 |
+| Real-time delivery, typing, presence | ws-gateway | 8085 |
+| Routing (only if new path prefix) | api-gateway | 8080 |
+
+---
+
+## The 14 Steps
+
+### Step 1: Database Migration (if persistent data needed)
 
 **File:** `{service}/src/main/resources/db/migration/V{N}__{description}.sql`
 
-Create a new Flyway migration. Copy to ALL 5 services (auth, channel, message, media, ws-gateway).
-
+**Check first:** Many columns/tables already exist from V4. Run:
 ```sql
--- Example: Adding a "bookmarks" feature
-CREATE TABLE IF NOT EXISTS bookmarks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
-    user_id UUID NOT NULL,
-    channel_id UUID NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    url TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(channel_id, url)
-);
-CREATE INDEX IF NOT EXISTS idx_bookmarks_channel ON bookmarks(channel_id);
+\d messages    -- check for parent_message_id, reply_count, edited_at
+\d channels    -- check for topic, description
+\d users       -- check for avatar_url, status_text, timezone
+\dt reactions  -- check if table exists
+\dt pinned_messages
+\dt starred_items
+```
 
--- Or adding a column to existing table:
-ALTER TABLE messages ADD COLUMN IF NOT EXISTS some_field VARCHAR(255);
+**If migration needed:**
+```sql
+-- Always idempotent
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS new_field TYPE;
+CREATE TABLE IF NOT EXISTS new_table (...);
+CREATE INDEX IF NOT EXISTS idx_name ON table(columns);
+```
+
+**Copy to ALL 5 services:**
+```bash
+for svc in auth-service channel-service message-service media-service ws-gateway; do
+  cp "$SRC" "$svc/src/main/resources/db/migration/"
+done
 ```
 
 **Rules:**
-- Always use `IF NOT EXISTS` / `IF NOT EXISTS` (idempotent)
-- Always include `tenant_id` column for multi-tenancy
-- Always add relevant indexes
-- Copy migration to ALL 5 service dirs (shared DB, first service to start runs it)
-- Increment version number from last migration (check existing V*.sql files)
+- Always include `tenant_id` for multi-tenancy
+- Always add indexes for WHERE clause columns
+- Use `IF NOT EXISTS` / `IF NOT EXISTS` everywhere
+- Version number: check latest V*.sql and increment
 
-### Step 2: Entity (if new table or new columns)
+### Step 2: Entity (in common/)
 
-**File:** `common/src/main/java/com/slackmsg/domain/entity/{EntityName}.java`
+**File:** `common/src/main/java/com/slackmsg/domain/entity/{Entity}.java`
 
+**Check first:** Entity may already exist (Reaction.java, PinnedMessage.java, StarredItem.java).
+
+**For new columns on existing entity:** just add the field:
+```java
+@Column(name = "edited_at")
+private Instant editedAt;
+```
+
+**For new entity:**
 ```java
 package com.slackmsg.domain.entity;
 
@@ -60,11 +90,11 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "bookmarks", uniqueConstraints = {
-    @UniqueConstraint(columnNames = {"channel_id", "url"})
+@Table(name = "table_name", uniqueConstraints = {
+    @UniqueConstraint(columnNames = {"col1", "col2"})  // if needed
 })
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
-public class Bookmark {
+public class EntityName {
 
     @Id
     @GeneratedValue(generator = "UUID")
@@ -75,17 +105,7 @@ public class Bookmark {
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
 
-    @Column(name = "user_id", nullable = false)
-    private UUID userId;
-
-    @Column(name = "channel_id", nullable = false)
-    private UUID channelId;
-
-    @Column(nullable = false)
-    private String name;
-
-    @Column(nullable = false, columnDefinition = "TEXT")
-    private String url;
+    // ... fields matching DB columns ...
 
     @Builder.Default
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -93,56 +113,82 @@ public class Bookmark {
 }
 ```
 
-**For existing entities** — just add the field with `@Column`:
-```java
-@Column(name = "edited_at")
-private Instant editedAt;
-```
+**CRITICAL: Use `javax.persistence.*` NOT `jakarta.persistence.*`**
 
-### Step 3: Repository (JPA)
+### Step 3: Repository (JPA, in owning service)
 
 **File:** `{service}/src/main/java/com/slackmsg/{service}/adapter/postgres/{Entity}Repository.java`
 
 ```java
 package com.slackmsg.message.adapter.postgres;
 
-import com.slackmsg.domain.entity.Bookmark;
+import com.slackmsg.domain.entity.Reaction;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.UUID;
 
-public interface BookmarkRepository extends JpaRepository<Bookmark, UUID> {
-    List<Bookmark> findByChannelIdOrderByCreatedAtDesc(UUID channelId);
-    void deleteByIdAndChannelId(UUID id, UUID channelId);
+public interface ReactionRepository extends JpaRepository<Reaction, UUID> {
+
+    List<Reaction> findByMessageIdOrderByCreatedAtAsc(UUID messageId);
+
+    boolean existsByMessageIdAndUserIdAndEmoji(UUID messageId, UUID userId, String emoji);
+
+    void deleteByMessageIdAndUserIdAndEmoji(UUID messageId, UUID userId, String emoji);
+
+    // Atomic counter update (race-safe)
+    @Modifying
+    @Query("UPDATE Message m SET m.replyCount = m.replyCount + 1 WHERE m.id = :id")
+    void incrementReplyCount(@Param("id") UUID id);
 }
 ```
 
-### Step 4: Request/Response DTOs
+**Rules:**
+- Use Spring Data method name conventions for simple queries
+- Use `@Query` for complex queries or atomic updates
+- Use `@Modifying` with `@Query` for UPDATE/DELETE operations
+- Always include `tenantId` in queries that touch multi-tenant data
 
-**Request:** `common/src/main/java/com/slackmsg/dto/request/{FeatureName}Request.java`
+### Step 4: Request DTO (in common/)
+
+**File:** `common/src/main/java/com/slackmsg/dto/request/{Action}{Feature}Request.java`
 
 ```java
 package com.slackmsg.dto.request;
 
 import lombok.Data;
-import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.NotNull;
+import javax.validation.constraints.*;
 import java.util.UUID;
 
 @Data
-public class AddBookmarkRequest {
-    @NotBlank private String name;
-    @NotBlank private String url;
+public class AddReactionRequest {
+    @NotBlank(message = "Emoji is required")
+    @Size(max = 100, message = "Emoji too long")
+    private String emoji;
 }
 ```
 
-**Response:** `common/src/main/java/com/slackmsg/dto/response/{FeatureName}Response.java`
+**Validation Rules (apply ALL that match):**
+- Required strings: `@NotBlank`
+- Required objects: `@NotNull`
+- UUIDs: `@NotNull` (Spring auto-validates format)
+- Strings with max length: `@Size(max = N)`
+- Email: `@Email`
+- Positive numbers: `@Positive`
+- Size-limited content: `@Size(max = 40960)` (40KB for message content)
+- Lists: `@NotEmpty` for required lists
+
+### Step 5: Response DTO (in common/)
+
+**File:** `common/src/main/java/com/slackmsg/dto/response/{Feature}Response.java`
 
 ```java
 package com.slackmsg.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.slackmsg.domain.entity.Bookmark;
+import com.slackmsg.domain.entity.Reaction;
 import lombok.Builder;
 import lombok.Data;
 import java.time.Instant;
@@ -150,318 +196,300 @@ import java.util.UUID;
 
 @Data @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public class BookmarkResponse {
+public class ReactionResponse {
     private UUID id;
-    private String name;
-    private String url;
-    private UUID addedBy;
+    private UUID messageId;
+    private UUID userId;
+    private String emoji;
     private Instant createdAt;
 
-    public static BookmarkResponse from(Bookmark b) {
-        return BookmarkResponse.builder()
-                .id(b.getId())
-                .name(b.getName())
-                .url(b.getUrl())
-                .addedBy(b.getUserId())
-                .createdAt(b.getCreatedAt())
+    public static ReactionResponse from(Reaction r) {
+        return ReactionResponse.builder()
+                .id(r.getId())
+                .messageId(r.getMessageId())
+                .userId(r.getUserId())
+                .emoji(r.getEmoji())
+                .createdAt(r.getCreatedAt())
                 .build();
     }
 }
 ```
 
-### Step 5: Service (business logic)
+**Rules:**
+- Always `@JsonInclude(JsonInclude.Include.NON_NULL)` — omit null fields
+- Always static `from(Entity)` factory method
+- Never expose internal fields (password_hash, etc.)
 
-**File:** `{service}/src/main/java/com/slackmsg/{service}/service/{FeatureName}Service.java`
+### Step 6: Service (business logic)
+
+**File:** `{service}/src/main/java/com/slackmsg/{service}/service/{Feature}Service.java`
 
 ```java
 package com.slackmsg.message.service;
 
-import com.slackmsg.domain.entity.Bookmark;
-import com.slackmsg.dto.request.AddBookmarkRequest;
-import com.slackmsg.message.adapter.postgres.BookmarkRepository;
+import com.slackmsg.domain.entity.Reaction;
+import com.slackmsg.dto.request.AddReactionRequest;
+import com.slackmsg.message.adapter.postgres.ReactionRepository;
+import com.slackmsg.port.service.ChannelServicePort;
 import com.slackmsg.util.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import java.util.List;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class BookmarkService {
+public class ReactionService {
 
-    private final BookmarkRepository bookmarkRepo;
+    private final ReactionRepository reactionRepo;
+    private final ChannelServicePort channelService;
+    private final FanoutService fanoutService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
-    public Bookmark addBookmark(UUID channelId, AddBookmarkRequest request) {
-        Bookmark bookmark = Bookmark.builder()
-                .tenantId(TenantContext.getTenantId())
-                .userId(TenantContext.getUserId())
+    @Transactional
+    public Reaction addReaction(UUID channelId, UUID messageId, AddReactionRequest req) {
+        UUID tenantId = TenantContext.getTenantId();
+        UUID userId = TenantContext.getUserId();
+
+        // Authorization: must be channel member
+        if (!channelService.isMember(channelId, userId)) {
+            throw new SecurityException("Not a member of this channel");
+        }
+
+        // Validate message exists and is not deleted
+        // (query message store or validate via existing endpoint)
+
+        Reaction reaction = Reaction.builder()
+                .tenantId(tenantId)
                 .channelId(channelId)
-                .name(request.getName())
-                .url(request.getUrl())
+                .messageId(messageId)
+                .userId(userId)
+                .emoji(req.getEmoji())
                 .build();
-        return bookmarkRepo.save(bookmark);
-    }
 
-    public List<Bookmark> listBookmarks(UUID channelId) {
-        return bookmarkRepo.findByChannelIdOrderByCreatedAtDesc(channelId);
-    }
+        try {
+            reaction = reactionRepo.save(reaction);
+        } catch (DataIntegrityViolationException e) {
+            throw new IllegalArgumentException("Already reacted with this emoji");
+        }
 
-    public void removeBookmark(UUID channelId, UUID bookmarkId) {
-        bookmarkRepo.deleteByIdAndChannelId(bookmarkId, channelId);
+        // Fan-out (best-effort)
+        try {
+            String payload = com.slackmsg.util.WsPayloadBuilder.buildReactionAdded(
+                    tenantId, channelId, messageId, userId, req.getEmoji(), objectMapper);
+            fanoutService.fanoutEvent(tenantId, channelId, payload, userId, false);
+        } catch (Exception e) {
+            log.error("Reaction fanout failed: {}", e.getMessage());
+        }
+
+        log.info("Reaction added: msgId={} userId={} emoji={}", messageId, userId, req.getEmoji());
+        return reaction;
     }
 }
 ```
 
-**Rules:**
-- Always use `TenantContext.getTenantId()` and `TenantContext.getUserId()` — never pass from handler
-- Keep under 100 lines. Split into multiple services if larger.
-- Use `@RequiredArgsConstructor` + `private final` for dependency injection
-- Never catch exceptions in services (let `GlobalExceptionHandler` handle them)
+**Service Rules:**
+- `@RequiredArgsConstructor` + `private final` for ALL dependencies
+- Use `TenantContext.getTenantId()` / `getUserId()` — never pass from handler
+- Check membership for channel operations: `channelService.isMember()`
+- Check authorization for admin operations: use `AuthorizationService`
+- Wrap fan-out in try-catch (best-effort)
+- `@Transactional` for writes, `@Transactional(readOnly = true)` for reads
+- Max 100 lines. Split if larger.
+- Log ONE line per operation at INFO level
 
-### Step 6: Handler (REST endpoint)
+### Step 7: Handler (REST endpoint)
 
-**File:** `{service}/src/main/java/com/slackmsg/{service}/handler/{FeatureName}Handler.java`
+**File:** `{service}/src/main/java/com/slackmsg/{service}/handler/{Feature}Handler.java`
 
 ```java
 package com.slackmsg.message.handler;
 
-import com.slackmsg.dto.request.AddBookmarkRequest;
-import com.slackmsg.dto.response.BookmarkResponse;
-import com.slackmsg.message.service.BookmarkService;
+import com.slackmsg.dto.request.AddReactionRequest;
+import com.slackmsg.dto.response.ReactionResponse;
+import com.slackmsg.message.service.ReactionService;
 import com.slackmsg.util.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import javax.validation.Valid;
-import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api/v1/channels/{channelId}/bookmarks")
+@RequestMapping("/api/v1/channels/{channelId}/messages/{messageId}/reactions")
 @RequiredArgsConstructor
-public class BookmarkHandler {
+public class ReactionHandler {
 
-    private final BookmarkService bookmarkService;
+    private final ReactionService reactionService;
 
     @PostMapping
-    public ResponseEntity<ApiResponse<BookmarkResponse>> add(
+    public ResponseEntity<ApiResponse<ReactionResponse>> add(
             @PathVariable UUID channelId,
-            @Valid @RequestBody AddBookmarkRequest request) {
-        var bookmark = bookmarkService.addBookmark(channelId, request);
-        return ResponseEntity.ok(ApiResponse.ok("Bookmark added", BookmarkResponse.from(bookmark)));
-    }
-
-    @GetMapping
-    public ResponseEntity<ApiResponse<List<BookmarkResponse>>> list(@PathVariable UUID channelId) {
-        var bookmarks = bookmarkService.listBookmarks(channelId).stream()
-                .map(BookmarkResponse::from)
-                .collect(Collectors.toList());
-        return ResponseEntity.ok(ApiResponse.ok(bookmarks));
-    }
-
-    @DeleteMapping("/{bookmarkId}")
-    public ResponseEntity<ApiResponse<Void>> remove(
-            @PathVariable UUID channelId, @PathVariable UUID bookmarkId) {
-        bookmarkService.removeBookmark(channelId, bookmarkId);
-        return ResponseEntity.ok(ApiResponse.ok("Bookmark removed", null));
+            @PathVariable UUID messageId,
+            @Valid @RequestBody AddReactionRequest request) {
+        var reaction = reactionService.addReaction(channelId, messageId, request);
+        return ResponseEntity.ok(ApiResponse.ok("Reaction added", ReactionResponse.from(reaction)));
     }
 }
 ```
 
-**Rules:**
-- Handlers are THIN — no business logic, just extract params + call service + return ApiResponse
-- Always use `@Valid` on request bodies
-- Always return `ApiResponse<T>`
-- Path pattern: `/api/v1/{resource}` or `/api/v1/channels/{channelId}/{sub-resource}`
+**Handler Rules:**
+- THIN — no business logic, just extract params + call service + return ApiResponse
+- Always `@Valid` on `@RequestBody`
+- Always return `ResponseEntity<ApiResponse<T>>`
+- Use `@PathVariable` for UUIDs (Spring auto-validates format)
 
-### Step 7: API Gateway Route (if new path pattern)
+### Step 8: API Gateway Route (if needed)
 
 **File:** `api-gateway/src/main/java/com/slackmsg/gateway/config/ServiceRoutes.java`
 
-Add route if the path doesn't already match an existing pattern. Most `/api/v1/channels/{id}/*` paths already route to the correct service.
+**Check first:** Most `/api/v1/channels/{id}/*` paths already route to the correct service. Only add a route if you have a completely new path prefix.
 
-Check existing routes first — you may not need to change anything.
+### Step 9: WebSocket Event (if real-time notification needed)
 
-### Step 8: Real-Time Event (if feature needs WebSocket notification)
-
-**8a. Build the event payload:**
-
-Use existing builder in `WsPayloadBuilder.java`, or add a new one:
+**9a. Check WsEventType enum** — type may already exist
+**9b. Check WsPayloadBuilder** — builder may already exist
+**9c. If new type needed**, add to enum and builder (see WEBSOCKET.md)
+**9d. Fan out from service:**
 
 ```java
-// In WsPayloadBuilder.java
-public static String buildBookmarkAdded(UUID tenantId, UUID channelId,
-                                         String name, String url, ObjectMapper objectMapper) {
-    Map<String, Object> data = new LinkedHashMap<>();
-    data.put("name", name);
-    data.put("url", url);
-    return buildEvent(WsEventType.CHANNEL_UPDATED, tenantId, channelId, data, objectMapper);
-}
+// Channel-scoped event (reactions, pins, threads, edits, deletes)
+String payload = WsPayloadBuilder.buildXxx(tenantId, channelId, ...data..., objectMapper);
+fanoutService.fanoutEvent(tenantId, channelId, payload, excludeUserId, trackUnread);
+
+// Tenant-scoped event (presence changes)
+String payload = WsPayloadBuilder.buildPresenceChange(tenantId, userId, status, objectMapper);
+fanoutService.fanoutToTenant(tenantId, payload, excludeUserId);
 ```
 
-**8b. Add event type (if needed):**
+**Fan-out parameters:**
+- `excludeUserId`: the user who triggered the action (they don't need their own event). null = send to all.
+- `trackUnread`: `true` for messages (increment offline unread count). `false` for everything else (reactions, typing, presence, edits).
 
-Add to `WsEventType.java` enum if no existing type fits:
-```java
-BOOKMARK_ADDED("bookmark.added"),
-```
-
-**8c. Fan out the event:**
-
-In your service, inject `FanoutService` and call:
-```java
-// Channel-scoped event (only channel members receive it)
-String payload = WsPayloadBuilder.buildBookmarkAdded(tenantId, channelId, name, url, objectMapper);
-fanoutService.fanoutEvent(tenantId, channelId, payload, currentUserId, false);
-
-// Tenant-scoped event (all online users in tenant receive it)
-String payload = WsPayloadBuilder.buildPresenceChange(tenantId, userId, "online", objectMapper);
-fanoutService.fanoutToTenant(tenantId, payload, null);
-```
-
-**Parameters:**
-- `excludeUserId`: user to skip (usually the actor), null to include all
-- `trackUnread`: true for messages (increment offline unread count), false for ephemeral events
-
-### Step 9: Internal API (if cross-service data needed)
+### Step 10: Internal API (if cross-service data needed)
 
 **File:** `{service}/src/main/java/com/slackmsg/{service}/handler/{Service}InternalHandler.java`
 
+Internal endpoints are at `/internal/*` — excluded from JWT auth. Used only by other services via `ServiceClient`.
+
+### Step 11: Unit Tests
+
+**File:** `{service}/src/test/java/com/slackmsg/{service}/service/{Feature}ServiceTest.java`
+
+**Test cases for EVERY new service method:**
+- [ ] Happy path (valid input, authorized user)
+- [ ] Membership check fails → SecurityException
+- [ ] Authorization check fails → SecurityException
+- [ ] Resource not found → IllegalArgumentException
+- [ ] Duplicate (unique constraint) → graceful handling
+- [ ] Deleted/archived resource → blocked
+- [ ] Fan-out failure → operation still succeeds
+- [ ] Input validation → IllegalArgumentException
+
+**Template:**
 ```java
-@RestController
-@RequestMapping("/internal/bookmarks")
-@RequiredArgsConstructor
-public class BookmarkInternalHandler {
-    // Internal endpoints are NOT behind JWT auth (excluded in JwtAuthFilter)
-    // Used by other services for cross-service queries
+@ExtendWith(MockitoExtension.class)
+class ReactionServiceTest {
+
+    @Mock private ReactionRepository reactionRepo;
+    @Mock private ChannelServicePort channelService;
+    @Mock private FanoutService fanoutService;
+    @Mock private ObjectMapper objectMapper;
+    @InjectMocks private ReactionService reactionService;
+
+    private final UUID tenantId = UUID.randomUUID();
+    private final UUID userId = UUID.randomUUID();
+
+    @BeforeEach
+    void setUp() {
+        TenantContext.setTenantId(tenantId);
+        TenantContext.setUserId(userId);
+        TenantContext.setDisplayName("Test User");
+    }
+
+    @AfterEach
+    void tearDown() {
+        TenantContext.clear();
+    }
+
+    @Test
+    void addReaction_success() { ... }
+
+    @Test
+    void addReaction_notMember() {
+        when(channelService.isMember(any(), any())).thenReturn(false);
+        assertThrows(SecurityException.class, () ->
+            reactionService.addReaction(channelId, messageId, request));
+    }
 }
 ```
 
-**Client side:** Create `client/{Service}Client.java` extending `ServiceClient` in the calling service.
+### Step 12: E2E Test
 
-### Step 10: Test
+**File:** Add test cases to `test-e2e.sh`
 
-Run the full E2E test:
+Follow existing pattern:
 ```bash
-./test-e2e.sh
+# --- REACTIONS ---
+echo "--- REACTIONS ---"
+REACTION=$(curl -s -X POST "http://localhost:8083/api/v1/channels/$CH_ID/messages/$MSG_ID/reactions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"emoji":"+1"}')
+check "$REACTION" "Add reaction"
 ```
 
-Add new test cases to `test-e2e.sh` for the new feature. Follow the existing curl pattern.
+### Step 13: Update HTML Demo Client (if UI-visible feature)
 
-### Step 11: Build & Deploy
+**File:** `api-gateway/src/main/resources/static/index.html`
+
+Add UI elements for the new feature following existing patterns in the HTML.
+
+### Step 14: Build, Deploy, Verify
 
 ```bash
-# Compile
-JAVA_HOME=$(/usr/libexec/java_home -v 11) mvn install -N -q && mvn install -pl common -q && mvn package -DskipTests -q
+# Build
+mvn install -N -q && mvn install -pl common -q && mvn package -DskipTests -q
 
-# Deploy to Docker
-docker-compose build --quiet && docker-compose up -d
+# Run unit tests
+mvn test
 
-# Verify
+# Deploy (clean start if migration changed)
+docker-compose down -v && docker-compose build --quiet && docker-compose up -d
+
+# Wait for health
+sleep 30
+for PORT in 8080 8081 8082 8083 8084 8085; do
+  curl -s -m 5 "http://localhost:$PORT/actuator/health" | python3 -c "import sys,json; print(':$PORT →', json.load(sys.stdin).get('status','DOWN'))" 2>/dev/null
+done
+
+# Run E2E
 ./test-e2e.sh
 ```
 
 ---
 
-## Common Feature Patterns
+## Post-Build Quality Checklist
 
-### Pattern A: Add Reactions to Messages
+After implementing a feature, verify ALL of these:
 
-1. **Entity:** `Reaction.java` (already exists in common)
-2. **Repository:** `ReactionRepository.java` in message-service
-3. **DTOs:** `AddReactionRequest.java`, `ReactionResponse.java`
-4. **Service:** `ReactionService.java` in message-service
-5. **Handler:** Add to `MessageHandler.java` or new `ReactionHandler.java`:
-   - `POST /api/v1/channels/{channelId}/messages/{messageId}/reactions`
-   - `DELETE /api/v1/channels/{channelId}/messages/{messageId}/reactions/{emoji}`
-   - `GET /api/v1/channels/{channelId}/messages/{messageId}/reactions`
-6. **WS Event:** `WsPayloadBuilder.buildReactionAdded()` (already exists)
-7. **Fanout:** `fanoutService.fanoutEvent(tenantId, channelId, payload, userId, false)`
-
-### Pattern B: Add Threads/Replies
-
-1. **Entity:** `Message.parentMessageId` (column already exists)
-2. **Service:** Update `MessageService.sendMessage()` to accept `parentMessageId`
-3. **Handler:** Update `MessageHandler`:
-   - POST body already has `SendMessageRequest` — add `parentMessageId` field
-   - Add `GET /api/v1/channels/{channelId}/threads/{messageId}` for thread replies
-4. **WS Event:** `WsPayloadBuilder.buildThreadReply()` (already exists)
-5. **Fanout:** Same as message fan-out, just different event type
-
-### Pattern C: Add Message Edit
-
-1. **Entity:** `Message.editedAt` (column already exists)
-2. **DTOs:** `EditMessageRequest.java` (content field only)
-3. **Service:** `MessageService.editMessage(channelId, messageId, newContent)`
-   - Validate ownership (senderId == currentUserId)
-   - Update content + editedAt
-4. **Handler:** `PATCH /api/v1/channels/{channelId}/messages/{messageId}`
-5. **WS Event:** `WsPayloadBuilder.buildMessageEdited()` (already exists)
-6. **Fanout:** `fanoutService.fanoutEvent(tenantId, channelId, payload, userId, false)`
-
-### Pattern D: Add Message Delete
-
-1. **Entity:** `Message.isDeleted` (already exists, soft delete)
-2. **Service:** `MessageService.deleteMessage(channelId, messageId)`
-   - Validate ownership or admin
-   - Set `isDeleted = true`
-3. **Handler:** `DELETE /api/v1/channels/{channelId}/messages/{messageId}`
-4. **WS Event:** `WsPayloadBuilder.buildMessageDeleted()` (already exists)
-
-### Pattern E: Add Typing Indicators
-
-1. **No database** — purely real-time
-2. **WS Handler:** Add `case "typing":` in `WsHandler.handleTextMessage()`:
-   - Extract channelId from client message
-   - Build `WsPayloadBuilder.buildTypingStart()` (already exists)
-   - Call `fanoutService.fanoutEvent()` — no unread tracking
-3. **Client sends:** `{"type": "typing", "channelId": "..."}`
-4. **Redis TTL key** (optional): `typing:{channelId}:{userId}` with 5s TTL
-
-### Pattern F: Add User Presence
-
-1. **WS Gateway:** In `WsSessionManager.register()` — publish presence.online event
-2. **WS Gateway:** In `WsSessionManager.unregister()` — publish presence.offline event
-3. **Redis:** `SADD online:{tenantId} {userId}` on connect, `SREM` on disconnect
-4. **WS Event:** `WsPayloadBuilder.buildPresenceChange()` (already exists)
-5. **Fanout:** `fanoutService.fanoutToTenant()` (already exists, broadcasts to all)
-
-### Pattern G: Add Pinned Messages
-
-1. **Entity:** `PinnedMessage.java` (already exists in common)
-2. **Repository:** `PinnedMessageRepository.java` in message-service
-3. **Handler:**
-   - `POST /api/v1/channels/{channelId}/pins/{messageId}`
-   - `DELETE /api/v1/channels/{channelId}/pins/{messageId}`
-   - `GET /api/v1/channels/{channelId}/pins`
-4. **WS Event:** `WsPayloadBuilder.buildPinAdded()` (already exists)
-
-### Pattern H: Add Channel Topic/Description
-
-1. **Entity:** `Channel.topic`, `Channel.description` (columns already exist)
-2. **DTOs:** `UpdateChannelRequest.java` (topic, description)
-3. **Service:** `ChannelService.updateChannel(channelId, request)`
-4. **Handler:** `PATCH /api/v1/channels/{channelId}`
-5. **WS Event:** `WsPayloadBuilder.buildChannelUpdated()` (already exists)
-
-### Pattern I: Add Message Search
-
-1. **Repository:** Add `MessageRepository.searchByContent(tenantId, query, limit)`
-   - Use `@Query("SELECT m FROM Message m WHERE m.tenantId = :tid AND LOWER(m.content) LIKE LOWER(CONCAT('%', :q, '%'))")`
-2. **Service:** `SearchService.search(query, channelId, limit)`
-3. **Handler:** `GET /api/v1/search?q=text&channelId=X&limit=20`
-4. **No WS event** (search is query-only)
-
-### Pattern J: Add Scheduled Messages
-
-1. **Entity:** New `ScheduledMessage.java` (id, tenantId, channelId, userId, content, scheduledAt, status)
-2. **Migration:** New table `scheduled_messages`
-3. **Service:** `ScheduledMessageService` with `@Scheduled` method that polls every 30s
-4. **Handler:**
-   - `POST /api/v1/channels/{channelId}/scheduled-messages`
-   - `GET /api/v1/scheduled-messages`
-   - `DELETE /api/v1/scheduled-messages/{id}`
-5. **Execution:** When `scheduledAt <= now()`, call `MessageService.sendMessage()` internally
+- [ ] **Tenant isolation:** All queries include `tenant_id`
+- [ ] **Authorization:** Membership/admin checked for every operation
+- [ ] **Validation:** All inputs validated (required fields, size limits, format)
+- [ ] **Soft delete respected:** Queries filter `is_deleted = false` where applicable
+- [ ] **Archived channels:** Blocked from writes where applicable
+- [ ] **Race conditions:** Unique constraints + `DataIntegrityViolationException` handling
+- [ ] **Atomic counters:** SQL `SET count = count + 1` (not read-modify-write)
+- [ ] **Fan-out wrapped:** try-catch around fan-out (best-effort)
+- [ ] **Transaction scope:** No REST/Redis calls inside DB transaction
+- [ ] **Null safety:** All nullable fields handled
+- [ ] **Logging:** One INFO log per public method call
+- [ ] **Tests pass:** Unit tests + E2E tests
+- [ ] **No hardcoded keys:** Redis keys use `RedisKeys.*` methods
+- [ ] **Response format:** `ApiResponse<T>` wrapper, `@JsonInclude(NON_NULL)`
+- [ ] **Pagination:** Limit clamped to [1, 100] for list endpoints
