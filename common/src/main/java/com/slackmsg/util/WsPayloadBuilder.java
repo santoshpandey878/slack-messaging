@@ -114,6 +114,13 @@ public class WsPayloadBuilder {
         return buildEvent(WsEventType.TYPING_START, tenantId, channelId, data, objectMapper);
     }
 
+    public static String buildTypingStop(UUID tenantId, UUID channelId, UUID userId,
+                                          ObjectMapper objectMapper) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("userId", userId.toString());
+        return buildEvent(WsEventType.TYPING_STOP, tenantId, channelId, data, objectMapper);
+    }
+
     // ═══ Presence Events ═══
 
     public static String buildPresenceChange(UUID tenantId, UUID userId, String status,
@@ -129,6 +136,13 @@ public class WsPayloadBuilder {
     public static String buildChannelUpdated(UUID tenantId, UUID channelId,
                                               Map<String, Object> changes, ObjectMapper objectMapper) {
         return buildEvent(WsEventType.CHANNEL_UPDATED, tenantId, channelId, changes, objectMapper);
+    }
+
+    public static String buildChannelArchived(UUID tenantId, UUID channelId,
+                                               ObjectMapper objectMapper) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("channelId", channelId.toString());
+        return buildEvent(WsEventType.CHANNEL_ARCHIVED, tenantId, channelId, data, objectMapper);
     }
 
     // ═══ Membership Events ═══

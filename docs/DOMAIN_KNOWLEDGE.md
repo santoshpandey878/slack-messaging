@@ -455,3 +455,123 @@ Extended user information: avatar, status text, timezone.
 - **Mention user not in channel:** Include in WS event data but don't send them the message (they're not a member)
 - **Mention in thread:** Only notify if user is thread participant or explicitly @mentioned
 - **@channel in large channel:** Rate limit — don't allow @channel in channels with > 1000 members unless sender is admin
+
+---
+
+## Channel Archiving
+
+### What It Is
+Archiving a channel makes it read-only. Members can still view history but cannot send messages, add members, or change settings.
+
+### Slack Behavior
+- Only channel admin or workspace admin can archive
+- Archived channels appear in a separate "Archived" section (or hidden from sidebar)
+- Members can still view message history, pins, files
+- Archived channels can be unarchived by admins
+- DM channels cannot be archived
+
+### Data Model
+- `channels.is_archived` (BOOLEAN, already exists, default FALSE)
+
+### API Endpoints
+- `POST /api/v1/channels/{channelId}/archive` — set `is_archived = true`
+- `POST /api/v1/channels/{channelId}/unarchive` — set `is_archived = false`
+
+### Edge Cases
+- **Send to archived channel:** 400 "Channel is archived"
+- **Add member to archived channel:** 400 "Channel is archived"
+- **Change topic of archived channel:** 400 "Channel is archived"
+- **Archive a DM:** 400 "Cannot archive DM channels"
+- **Archive already archived:** Idempotent — return 200
+- **Read history of archived:** Allowed (read-only access continues)
+
+### WS Events
+- `channel.archived` — fan out to channel members
+
+### Guard Clause (add to all write operations)
+```java
+if (channel.getIsArchived()) {
+    throw new IllegalArgumentException("Channel is archived");
+}
+```
+
+---
+
+## Message Forwarding
+
+### What It Is
+Forward an existing message to another channel or DM. The forwarded message shows as a quote/reference with attribution.
+
+### Slack Behavior
+- User selects a message → "Forward" → picks destination channel
+- Forwarded message shows: original sender, original timestamp, "Forwarded by X" attribution
+- Forwarding creates a NEW message in the destination channel (not a link)
+- Attachments/media are included in the forward
+- User must be a member of the destination channel
+
+### Data Model
+- No new table needed. Add to `messages`:
+  - `forwarded_from_message_id UUID` — nullable, references original message
+  - `forwarded_by UUID` — nullable, the user who forwarded
+
+### API Endpoints
+- `POST /api/v1/channels/{destChannelId}/messages/forward` — body: `{"sourceMessageId": "uuid", "sourceChannelId": "uuid", "comment": "optional added text"}`
+
+### Implementation
+1. Validate user is member of BOTH source and destination channels
+2. Fetch source message (check exists, not deleted)
+3. Create new message in destination with:
+   - `content`: source message content (+ optional comment)
+   - `senderName`: "Forwarded from {originalSender}"
+   - `forwarded_from_message_id`: source message ID
+   - `forwarded_by`: current user ID
+   - `messageType`: same as source (TEXT/MEDIA)
+   - `mediaUrl`/`mediaType`: copy from source if media
+4. Fan out as normal `message.new` event
+
+### Edge Cases
+- **Forward deleted message:** Block it — 400 "Original message has been deleted"
+- **Forward to channel you're not in:** 403 "Not a member of destination channel"
+- **Forward from channel you left:** 403 "Not a member of source channel"
+- **Forward a forward:** Allowed — chain the reference to the ORIGINAL message (not the intermediate forward)
+- **Forward thread reply:** Allowed — forward the reply content as a standalone message
+
+---
+
+## Webhook Integrations (Incoming)
+
+### What It Is
+External services can send messages to channels via webhook URLs. Similar to Slack's "Incoming Webhooks".
+
+### Behavior
+- Admin creates a webhook for a channel → gets a unique webhook URL
+- External service POSTs JSON to the webhook URL → message appears in channel
+- Webhook messages show as "Bot" or custom name/icon
+- No authentication needed (URL is the secret)
+
+### Data Model
+- New table: `webhooks` (id, tenant_id, channel_id, name, avatar_url, token, created_by, is_active, created_at)
+- `token` is a random string (UUID or HMAC secret) — part of the webhook URL
+
+### API Endpoints
+- `POST /api/v1/channels/{channelId}/webhooks` — create webhook (admin-only), returns webhook URL
+- `GET /api/v1/channels/{channelId}/webhooks` — list webhooks
+- `DELETE /api/v1/channels/{channelId}/webhooks/{webhookId}` — deactivate
+- `POST /webhooks/{token}` — external: send message (no auth, token is the secret)
+
+### Implementation
+1. Webhook URL format: `http://host/webhooks/{token}`
+2. Webhook endpoint is PUBLIC (no JWT) — add to `JwtAuthFilter` public paths
+3. On POST: look up webhook by token → get channel_id → create message with `messageType = SYSTEM`
+4. Rate limit: 1 message/sec per webhook token
+
+### Edge Cases
+- **Invalid token:** 404 (not 401 — don't reveal webhook existence)
+- **Deactivated webhook:** 404
+- **Archived channel:** 400 "Channel is archived"
+- **Webhook abuse (spam):** Per-token rate limit (1/sec), IP-based rate limit (10/sec)
+
+### Security
+- Tokens should be long random strings (UUID v4)
+- HTTPS in production (webhook URL contains the secret)
+- Optional: HMAC signature verification for outgoing webhooks

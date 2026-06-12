@@ -30,7 +30,7 @@ Before writing any code for a new feature:
 
 ---
 
-## The 14 Steps
+## The 18 Steps
 
 ### Step 1: Database Migration (if persistent data needed)
 
