@@ -39,53 +39,142 @@ A production-grade, multi-tenant, real-time messaging platform built with hexago
 | WebSocket        | Spring WebSocket (raw handler)  |
 | Authentication   | JWT (jjwt 0.11.5)              |
 | Migrations       | Flyway                          |
-| API Docs         | springdoc-openapi (Swagger UI)  |
 | Build            | Maven (multi-module)            |
 | Containerization | Docker + Docker Compose         |
+| Browser Testing  | Playwright (Dockerized)         |
+
+## Current Features
+
+| Feature | Status | Service |
+|---------|--------|---------|
+| Multi-tenant registration & login | Live | auth-service |
+| JWT authentication & token management | Live | auth-service |
+| Login lockout (5 failed attempts) | Live | auth-service |
+| Public/Private channels | Live | channel-service |
+| Direct messages (DM) with dedup | Live | channel-service |
+| Channel membership (add/remove/list) | Live | channel-service |
+| Real-time messaging via WebSocket | Live | message-service + ws-gateway |
+| Message history (cursor pagination) | Live | message-service |
+| Message idempotency (duplicate prevention) | Live | message-service |
+| Unread counts (Redis-backed) | Live | message-service |
+| Media upload via presigned URLs | Live | media-service |
+| Cross-tenant isolation | Live | all services |
+| Rate limiting (per-tenant, per-user) | Live | all services |
+
+## How to Test: Current Features
+
+### 1. Registration & Login
+1. Open http://localhost:8080
+2. Enter workspace slug "demo", email "admin@demo.com", name "Admin", password "test123456"
+3. Click **Register New Workspace** — you should see "Logged in as Admin" and WebSocket status turns green
+4. Click **Login / Register** again, enter same slug/email/password, click **Login** — should login successfully
+
+### 2. Channels & Messaging
+1. Click **+ Create Channel**, name it "general", click **Create**
+2. Type a message in the composer, press Enter or click **Send**
+3. Message appears immediately in the chat area
+
+### 3. Multi-User Real-Time (WebSocket)
+1. Open http://localhost:8080 in a second browser tab (incognito)
+2. Login with the same workspace slug but a different user (invite via **+ Invite User** first)
+3. Both users select the same channel
+4. User A sends a message — it appears in User B's tab in real-time via WebSocket
+5. User B sends a message — it appears in User A's tab in real-time
+
+### 4. Direct Messages
+1. Copy User B's ID (shown under their name in sidebar)
+2. In User A's tab, click **+ Direct Message**, paste the ID, click **Start DM**
+3. Send messages back and forth — they appear in real-time
+
+### 5. Media Upload
+1. Click the paperclip icon in the composer
+2. Select an image file — it uploads via presigned URL and appears in the chat
+
+### 6. Cross-Tenant Isolation
+1. Register a second workspace with a different slug
+2. Try to access the first workspace's channels — should be blocked
+
+---
+
+## What Makes This Project Complex
+
+This is not a simple CRUD app. Here's the engineering depth:
+
+### 1. Hexagonal Architecture (Ports & Adapters)
+Every service follows strict layered architecture: Handler → Service → Port (interface) → Adapter. Business logic depends ONLY on interfaces. You can swap PostgreSQL for Cassandra, Redis for Memcached, or MinIO for S3 by implementing a new adapter — zero business logic changes. This is the same pattern used at Netflix and Spotify.
+
+### 2. Multi-Tenant Data Isolation
+Every database query, every Redis key, every WebSocket delivery is scoped to a tenant. JWT carries `tenantId`, `JwtAuthFilter` sets `TenantContext` (ThreadLocal), and all data access enforces tenant boundaries. A bug in one tenant cannot leak data to another.
+
+### 3. Real-Time Fan-Out Pipeline
+Messages flow through a 10-step pipeline: API Gateway → message-service validates membership (REST to channel-service) → persists to PostgreSQL → FanoutService checks Redis for each member's connection → online members get Redis Pub/Sub push → ws-gateway delivers to WebSocket sessions (membership-verified) → offline members get unread count incremented. All best-effort — fan-out failure never fails the message send.
+
+### 4. Idempotency & Race Condition Handling
+- Message send is idempotent via Redis-backed idempotency keys (5-min TTL)
+- Concurrent reactions handled via UNIQUE constraints + DataIntegrityViolationException catch
+- Reply counts use atomic SQL (`SET reply_count = reply_count + 1`), never read-modify-write
+- DM creation deduplicated via sorted user ID pairs
+
+### 5. Three-Layer Test Strategy
+- **Unit tests** (Java/JUnit/Mockito) — test business logic in isolation
+- **E2E tests** (curl-based `test-e2e.sh`) — test REST API across all 5 services
+- **Browser tests** (Playwright in Docker `test-browser.sh`) — test real multi-user WebSocket interactions in Chromium. These catch bugs that curl tests fundamentally cannot: WS sender echo double-counting, cross-user delivery, DOM rendering issues
+
+### 6. Full CI/CD Pipeline
+- **CI**: GitHub Actions — builds, runs unit tests + E2E on every push
+- **CD**: Local watcher (`scripts/cd-watcher.sh`) polls GitHub every 30s, auto-deploys on new commits, runs health checks + E2E, logs results
+- Pipeline is mandatory: Code → Unit Tests → Docker Deploy → Health Check → E2E → Browser Tests → Commit → Push → CI → CD auto-deploy → Verify
+
+### 7. Production-Grade Knowledge Base
+16 documentation files covering: domain knowledge for 17 Slack features, pre-decided architectural tradeoffs, code quality standards, edge cases (30+ patterns), error handling hierarchy, feature workflow (20-step cookbook), frontend guide, NFR guide, and full reference docs. An AI agent can build features autonomously using only this knowledge base.
+
+### 8. Extensibility by Design
+V4 database migration pre-creates columns and tables for future features (threads, reactions, pins, stars, user profiles, channel topics) without changing existing behavior. WsEventType enum has 16 event types pre-defined. WsPayloadBuilder has all event builders ready. A new feature plugs into existing infrastructure.
+
+---
 
 ## Quick Start
 
 ### Prerequisites
-
 - Java 11 (Amazon Corretto recommended)
 - Maven 3.8+
 - Docker and Docker Compose
 
-### Build
+### Build & Deploy
 
 ```bash
 export JAVA_HOME=$(/usr/libexec/java_home -v 11)
 
-# Install parent POM and common module
-mvn install -N -q && mvn install -pl common -q
+# Build all modules
+mvn install -N -q && mvn install -pl common -q && mvn package -DskipTests -q
 
-# Package all services
-mvn package -DskipTests -q
+# Deploy (full reset)
+docker-compose down -v && docker-compose build --quiet && docker-compose up -d
+
+# Verify all 6 services are UP
+for PORT in 8080 8081 8082 8083 8084 8085; do
+  curl -s "http://localhost:$PORT/actuator/health" | python3 -c "import sys,json; print(':$PORT →', json.load(sys.stdin).get('status','DOWN'))"
+done
 ```
 
-### Deploy via Docker
+### Run Tests
 
 ```bash
-# Start everything (infra + all 6 services)
-docker-compose build --quiet && docker-compose up -d
+# Unit tests
+mvn test
 
-# Full reset (wipes all data)
-docker-compose down -v && docker-compose up -d
+# E2E tests (requires Docker containers running)
+./test-e2e.sh
+
+# Browser tests — multi-user Playwright tests via Docker (no Node.js needed)
+./test-browser.sh
 ```
 
-### Verify Health
+### Demo UI
 
-```bash
-# API Gateway (aggregates all services)
-curl http://localhost:8080/actuator/health
+Open **http://localhost:8080** — built-in Slack-like chat client.
 
-# Individual services
-curl http://localhost:8081/actuator/health   # auth
-curl http://localhost:8082/actuator/health   # channel
-curl http://localhost:8083/actuator/health   # message
-curl http://localhost:8084/actuator/health   # media
-curl http://localhost:8085/actuator/health   # ws-gateway
-```
+---
 
 ## Service Ports
 
@@ -139,37 +228,6 @@ curl http://localhost:8085/actuator/health   # ws-gateway
 
 Connect via `ws://localhost:8080/ws?token={jwt}`. Supports `ping`, `pong`, `sync`, and real-time message push.
 
-## Demo UI
-
-Open **http://localhost:8080** in your browser for the built-in chat client. Open two tabs to test real-time messaging between users.
-
-## Testing
-
-### Unit Tests
-
-```bash
-# Run all unit tests (~4 seconds, no Docker required)
-mvn test
-
-# Run a specific module's tests
-mvn test -pl media-service
-mvn test -pl ws-gateway
-```
-
-### E2E Tests
-
-```bash
-# Requires Docker containers running
-docker-compose up -d
-chmod +x test-e2e.sh && ./test-e2e.sh
-```
-
-## CI/CD
-
-**GitHub Actions** -- add a workflow at `.github/workflows/ci.yml` to run `mvn test` on push and `docker-compose build` on merge to main.
-
-**Local CD Watcher** -- use `start-all.sh` and `stop-all.sh` scripts for local development lifecycle.
-
 ## Project Structure
 
 ```
@@ -181,33 +239,36 @@ slack-messaging/              (parent POM)
 +-- media-service/            Presigned S3/MinIO upload URLs
 +-- ws-gateway/               WebSocket connections, real-time fan-out
 +-- api-gateway/              Reverse proxy, routing, static UI
++-- tests/browser/            Playwright browser tests (Dockerized)
++-- docs/                     16-file knowledge base
 +-- docker-compose.yml        Full-stack local deployment
-+-- test-e2e.sh               Automated end-to-end test script
++-- test-e2e.sh               Curl-based E2E tests
++-- test-browser.sh           Multi-user browser tests (Playwright in Docker)
++-- CLAUDE.md                 AI agent instructions
 ```
 
 ## Knowledge Base
 
 Detailed documentation lives in the `docs/` directory:
 
-- `ARCHITECTURE.md` -- System design, service boundaries, hexagonal layout
-- `API_DESIGN.md` -- REST endpoint conventions
-- `DATABASE.md` -- Schema, migrations, Flyway
-- `WEBSOCKET.md` -- Real-time event protocol
-- `SECURITY.md` -- Auth, tenant isolation, rate limiting
-- `TESTING.md` -- Test strategy and coverage
-- `DEPLOYMENT.md` -- Docker, CI/CD, environment config
-- `CONVENTIONS.md` -- Code style, naming, file locations
-- `FEATURE_WORKFLOW.md` -- Step-by-step guide for adding features
-
-## Key Design Decisions
-
-**Hexagonal Architecture (Ports and Adapters)** -- Business logic depends only on interfaces (ports). Infrastructure adapters (PostgreSQL, Redis, MinIO) are swappable without touching service code. Move from MinIO to S3, or Redis Pub/Sub to Kafka, by implementing a new adapter.
-
-**Multi-Tenant Isolation** -- Every request carries `tenant_id` via JWT. `TenantContext` (thread-local) is set by `JwtAuthFilter` and enforced at every query layer. Tenants cannot see each other's data.
-
-**Real-Time Delivery** -- Messages fan out via Redis Pub/Sub to WebSocket connections. Online users get instant push; offline users get unread counts incremented in Redis. Reconnection sync fetches missed messages from the database.
-
-**Service Independence** -- Each microservice owns its own domain, exposes REST APIs, and communicates via HTTP (service ports). Cross-service calls use `ServiceClient` with retry logic. Services can be scaled, deployed, and restarted independently.
+| Doc | What It Covers |
+|-----|---------------|
+| DOMAIN_KNOWLEDGE.md | 17 Slack features — exact behaviors, data model, edge cases |
+| TRADEOFFS.md | 11 pre-decided architectural decisions |
+| CODE_QUALITY.md | 10 quality standards, anti-patterns |
+| EDGE_CASES.md | 30+ edge case patterns across 9 categories |
+| ERROR_HANDLING.md | Exception hierarchy, fan-out errors, degradation matrix |
+| FEATURE_WORKFLOW.md | 20-step cookbook for building any feature |
+| FRONTEND_GUIDE.md | HTML demo client patterns, WS events, XSS prevention |
+| NFR_GUIDE.md | Performance, monitoring, rate limiting, scale |
+| ARCHITECTURE.md | System design, hexagonal layers, message delivery flow |
+| DATABASE.md | Full schema (9 tables), migrations |
+| API_DESIGN.md | REST conventions, response format |
+| WEBSOCKET.md | 16 event types, delivery pipeline |
+| CONVENTIONS.md | Naming, file locations, package structure |
+| SECURITY.md | JWT, tenant isolation, BCrypt, rate limiting |
+| TESTING.md | Build/deploy/test cycle |
+| DEPLOYMENT.md | Docker, CI/CD, environment variables |
 
 ## License
 
