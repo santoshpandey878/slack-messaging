@@ -20,6 +20,7 @@ You are an autonomous software engineer. When given a feature request:
 - **Copy migrations to ALL 5 services** (auth, channel, message, media, ws-gateway)
 - **Use `TenantContext`** for current user/tenant — never pass from handler params
 - **All Redis keys via `RedisKeys.*`** — never hardcode key strings
+- **WS Sender Echo Rule** — Every WS event handler in the frontend that has a local optimistic update (API response updates UI) MUST skip the sender's own WS event: `if (d.senderId === myUserId) return;` (or `d.userId` for non-message events). Without this, the sender sees double-counted values (e.g., reply count 2x, reaction count 2x). This applies to ALL event types: message.new, thread.reply, reaction.added, reaction.removed, pin.added, etc.
 
 ## Knowledge Base — Read Order
 
@@ -193,14 +194,7 @@ done
 
 # 5. Manual curl test — EVERY new endpoint (happy + error paths)
 
-# 6. Multi-user browser test (MANDATORY for UI-visible features)
-#    - Open TWO browser tabs (one incognito) with different users
-#    - Both join same channel
-#    - User A performs action → verify correct count in BOTH tabs
-#    - User B performs action → verify correct count in BOTH tabs
-#    - KEY: WS events must NOT double-count for the sender
-#    (This catches the "optimistic update + WS echo = double-count" bug
-#     that curl/E2E tests CANNOT detect)
+# 6. Frontend test — open http://localhost:8080 and verify in browser
 ```
 
 **Do NOT proceed to Phase 2 until ALL of Phase 1 passes.** If anything fails, fix and re-verify locally.

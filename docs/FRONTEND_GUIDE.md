@@ -232,24 +232,19 @@ userNames    // Map of userId → displayName (for name resolution)
 
 ## CRITICAL: Sender Echo Rule (WS + Optimistic Update)
 
-When a user performs an action (send reply, add reaction, etc.), the UI updates **twice** if not guarded:
-1. **Optimistic local update** — from the API response (immediate)
-2. **WS echo** — the server fans out the event to ALL channel members, including the sender
+When a user performs an action (send reply, add reaction, pin, etc.), the frontend updates the UI locally from the API response (optimistic update). The server ALSO fans out a WS event for the same action to ALL channel members — including the sender. Without a guard, the sender's UI updates **twice**, causing double-counted values (reply count 2x, reaction badge 2x, etc.).
 
-This causes **double-counting** (reply count 2x, reaction count 2x) for the acting user.
+**Rule:** In `handleWsEvent()`, EVERY event type that has a corresponding local optimistic update MUST skip the sender's own event at the top of its handler block:
 
-**FIX:** In `handleWsEvent()`, EVERY event type that has a local optimistic update MUST skip the sender:
 ```javascript
-// For message-like events:
+// For message/thread events (use senderId):
 if (d.senderId === myUserId) return;
 
-// For non-message events (reactions, pins, etc.):
+// For reaction/pin/membership events (use userId):
 if (d.userId === myUserId) return;
 ```
 
-This pattern is already applied for `message.new`. **Apply it to EVERY new event type.**
-
-**Testing:** This bug is INVISIBLE to curl/E2E tests. It ONLY appears in multi-user browser testing. Always test with two browser tabs (different users) after implementing any WS-enabled feature.
+This is NOT optional. `message.new` already does this. Every new event type (thread.reply, reaction.added, reaction.removed, pin.added, pin.removed, etc.) MUST follow the same pattern. If your feature has BOTH an `api()` call that updates the UI AND a WS event handler for the same action, you MUST add this guard. No exceptions.
 
 ## Feature UI Checklist
 When adding UI for a new feature:
@@ -261,4 +256,3 @@ When adding UI for a new feature:
 - [ ] Toast notifications for success/error
 - [ ] Activity log entries (automatic via `api()`)
 - [ ] No XSS — all user content escaped
-- [ ] **Multi-user browser test** — two tabs, two users, verify counts correct in both
