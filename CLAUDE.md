@@ -147,7 +147,7 @@ Every feature MUST complete this entire pipeline. Do NOT stop at writing code. D
 
 ```
 PHASE 1 — LOCAL (verify everything works before committing):
-  Code → Update README.md → Unit Tests → Docker Deploy → Health Check → E2E → Manual Curl Test → Frontend Test
+  Code → Unit Tests → Docker Deploy → Health Check → E2E → Manual Curl Test → Frontend Test → Update README.md
 
 PHASE 2 — GIT + CI/CD (only after Phase 1 passes):
   Commit → Push → CI (GitHub Actions) → Fix if CI fails → CD auto-deploys → Final verify
