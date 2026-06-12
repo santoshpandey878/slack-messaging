@@ -230,12 +230,35 @@ myTenantId   // Current tenant UUID
 userNames    // Map of userId → displayName (for name resolution)
 ```
 
+## CRITICAL: Sender Echo Rule (WS + Optimistic Update)
+
+When a user performs an action (send reply, add reaction, etc.), the UI updates **twice** if not guarded:
+1. **Optimistic local update** — from the API response (immediate)
+2. **WS echo** — the server fans out the event to ALL channel members, including the sender
+
+This causes **double-counting** (reply count 2x, reaction count 2x) for the acting user.
+
+**FIX:** In `handleWsEvent()`, EVERY event type that has a local optimistic update MUST skip the sender:
+```javascript
+// For message-like events:
+if (d.senderId === myUserId) return;
+
+// For non-message events (reactions, pins, etc.):
+if (d.userId === myUserId) return;
+```
+
+This pattern is already applied for `message.new`. **Apply it to EVERY new event type.**
+
+**Testing:** This bug is INVISIBLE to curl/E2E tests. It ONLY appears in multi-user browser testing. Always test with two browser tabs (different users) after implementing any WS-enabled feature.
+
 ## Feature UI Checklist
 When adding UI for a new feature:
 - [ ] API function added (using `api()` helper)
 - [ ] WS event handler added (in `ws.onmessage`)
+- [ ] **Sender echo guard** — WS handler skips sender's own events (`senderId/userId === myUserId`)
 - [ ] UI trigger (button/panel) added in sidebar or topbar
 - [ ] Message rendering updated if message display changes
 - [ ] Toast notifications for success/error
 - [ ] Activity log entries (automatic via `api()`)
 - [ ] No XSS — all user content escaped
+- [ ] **Multi-user browser test** — two tabs, two users, verify counts correct in both

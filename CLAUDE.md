@@ -193,7 +193,14 @@ done
 
 # 5. Manual curl test — EVERY new endpoint (happy + error paths)
 
-# 6. Frontend test — open http://localhost:8080 and verify in browser
+# 6. Multi-user browser test (MANDATORY for UI-visible features)
+#    - Open TWO browser tabs (one incognito) with different users
+#    - Both join same channel
+#    - User A performs action → verify correct count in BOTH tabs
+#    - User B performs action → verify correct count in BOTH tabs
+#    - KEY: WS events must NOT double-count for the sender
+#    (This catches the "optimistic update + WS echo = double-count" bug
+#     that curl/E2E tests CANNOT detect)
 ```
 
 **Do NOT proceed to Phase 2 until ALL of Phase 1 passes.** If anything fails, fix and re-verify locally.

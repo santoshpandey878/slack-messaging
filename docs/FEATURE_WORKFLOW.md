@@ -545,9 +545,35 @@ curl -s http://localhost:8080/api/v1/{new-endpoint} \
   -d '{...}' | python3 -m json.tool
 ```
 
-**CRITICAL:** Test EVERY new endpoint manually — happy path AND error cases (not member, not found, duplicate, deleted resource). Also verify the frontend (open http://localhost:8080 and test the feature in the UI).
+**CRITICAL:** Test EVERY new endpoint manually — happy path AND error cases (not member, not found, duplicate, deleted resource).
 
-**If anything fails:** Fix the code, re-run unit tests (Step 14), redeploy (Step 15), re-verify (Step 16). Loop until everything works locally.
+### Step 16b: Multi-User Browser Verification (MANDATORY for UI-visible features)
+
+**Why this step exists:** Automated E2E tests (curl-based) CANNOT catch frontend WebSocket bugs. Any feature that has both an API response AND a WS event will double-count for the sender unless the WS handler skips the sender's own events. This bug pattern was discovered in production and missed by ALL automated tests.
+
+**Test procedure:**
+1. Open http://localhost:8080 in **Browser Tab 1** — register/login as User A
+2. Open http://localhost:8080 in **Browser Tab 2** (incognito) — login as User B (same tenant)
+3. Both users join the same channel
+4. **Test from User A's perspective:**
+   - Perform the action (send thread reply, add reaction, etc.)
+   - Verify the count/display is correct in User A's tab (NOT doubled)
+   - Verify the count/display updates correctly in User B's tab (via WebSocket)
+5. **Test from User B's perspective:**
+   - User B performs the same action
+   - Verify correct in User B's tab (NOT doubled)
+   - Verify correct in User A's tab (via WebSocket)
+
+**The "sender echo" rule — apply to EVERY new WS event handler:**
+```javascript
+// In handleWsEvent(), for EVERY event type that has a local optimistic update:
+if (d.senderId === myUserId) return;  // or d.userId === myUserId for non-message events
+```
+This pattern already exists for `message.new`. It MUST be applied to thread.reply, reaction.added, reaction.removed, and any future event types.
+
+**If the feature has no frontend/WS component**, skip this step.
+
+**If anything fails:** Fix the code, re-run unit tests (Step 14), redeploy (Step 15), re-verify (Step 16/16b). Loop until everything works locally.
 
 ### Step 17: Commit & Push to GitHub (only after local verification passes)
 
