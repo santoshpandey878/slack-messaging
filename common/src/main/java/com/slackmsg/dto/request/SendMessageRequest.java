@@ -19,6 +19,9 @@ public class SendMessageRequest {
     @Size(max = 100, message = "Idempotency key too long")
     private String idempotencyKey;
 
+    /** Thread reply — set to parent message ID. Null for top-level messages. */
+    private java.util.UUID parentMessageId;
+
     /**
      * Validates that message has either content or media (or both).
      */
