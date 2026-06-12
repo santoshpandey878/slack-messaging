@@ -483,6 +483,14 @@ check "$REACTION" "Add reaction"
 
 Complete the **Feature UI Checklist** from FRONTEND_GUIDE.md before moving on.
 
+### Step 13b: Update README.md (MANDATORY for every feature add/remove)
+
+**File:** `README.md`
+
+- **Adding a feature:** Add it to the features list in README.md
+- **Removing a feature:** Remove it from README.md
+- This is NOT optional — README must always reflect the current state of the system
+
 ### Step 14: Build & Run Unit Tests (LOCAL)
 
 ```bash
