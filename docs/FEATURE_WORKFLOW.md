@@ -467,6 +467,37 @@ REACTION=$(curl -s -X POST "http://localhost:8083/api/v1/channels/$CH_ID/message
 check "$REACTION" "Add reaction"
 ```
 
+### Step 12b: Browser Test (MANDATORY for UI-visible features)
+
+**File:** Add test spec to `tests/browser/specs/{feature}.spec.js`
+
+Browser tests run real Chromium via Playwright in Docker. They catch WS/UI bugs that curl tests cannot.
+
+**When to add browser tests:**
+- Feature has frontend UI changes
+- Feature uses WebSocket events
+- Feature involves multi-user interaction (reactions, threads, typing, presence)
+
+**Test pattern:**
+```javascript
+const { test, expect } = require('@playwright/test');
+const { setupTwoUsers, sendMessage, waitForMessage } = require('../helpers');
+
+test.describe('Feature Name', () => {
+  let env;
+  test.beforeEach(async ({ browser }) => { env = await setupTwoUsers(browser); });
+  test.afterEach(async () => { await env.contextA.close(); await env.contextB.close(); });
+
+  test('User A does action, User B sees result', async () => {
+    // User A performs action via UI
+    // Verify correct in User A's page (no double-count)
+    // Verify correct in User B's page (WS delivery)
+  });
+});
+```
+
+**Run:** `./test-browser.sh` (uses Docker, no Node.js install needed)
+
 ### Step 13: Update HTML Demo Client (if UI-visible feature)
 
 **File:** `api-gateway/src/main/resources/static/index.html`
@@ -527,11 +558,16 @@ done
 
 **If any service is DOWN:** Check `docker-compose logs {service-name}`. Fix and redeploy. Do NOT commit broken code.
 
-### Step 16: Run E2E + Manual Verification (LOCAL — before any commit)
+### Step 16: Run E2E + Browser Tests + Manual Verification (LOCAL — before any commit)
 
 ```bash
 # Run existing E2E suite (must pass — no regressions)
 ./test-e2e.sh
+
+# Run browser tests — multi-user WS/UI verification via Playwright in Docker
+# Catches WS sender echo bugs, cross-user delivery issues, DOM rendering bugs
+# that curl-based E2E tests CANNOT detect
+./test-browser.sh
 
 # Manually test the NEW feature with curl
 TOKEN=$(curl -s http://localhost:8081/api/v1/auth/register -H 'Content-Type: application/json' \

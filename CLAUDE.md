@@ -147,7 +147,7 @@ Every feature MUST complete this entire pipeline. Do NOT stop at writing code. D
 
 ```
 PHASE 1 — LOCAL (verify everything works before committing):
-  Code → Unit Tests → Docker Deploy → Health Check → E2E → Manual Curl Test → Frontend Test → Update README.md (features list + "How to Test" demo steps)
+  Code → Unit Tests → Docker Deploy → Health Check → E2E → Browser Tests → Manual Curl Test → Frontend Test → Update README.md (features list + "How to Test" demo steps)
 
 PHASE 2 — GIT + CI/CD (only after Phase 1 passes):
   Commit → Push → CI (GitHub Actions) → Fix if CI fails → CD auto-deploys → Final verify
@@ -192,9 +192,12 @@ done
 # 4. E2E tests — no regressions
 ./test-e2e.sh
 
-# 5. Manual curl test — EVERY new endpoint (happy + error paths)
+# 5. Browser tests — multi-user WS/UI verification (catches bugs curl can't)
+./test-browser.sh
 
-# 6. Frontend test — open http://localhost:8080 and verify in browser
+# 6. Manual curl test — EVERY new endpoint (happy + error paths)
+
+# 7. Frontend test — open http://localhost:8080 and verify in browser
 ```
 
 **Do NOT proceed to Phase 2 until ALL of Phase 1 passes.** If anything fails, fix and re-verify locally.

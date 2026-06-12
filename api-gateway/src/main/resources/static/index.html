@@ -217,7 +217,7 @@
 <div class="log-panel" id="logPanel"></div>
 
 <script>
-const BASE = 'http://localhost:8080';
+const BASE = window.location.origin;
 let token = null, ws = null, channelId = null, channels = [];
 let myUserId = null, myDisplayName = null, myTenantId = null;
 const userNames = {};
@@ -296,7 +296,8 @@ function setAuth(data) {
 
 function connectWs() {
   if (ws) ws.close();
-  ws = new WebSocket('ws://localhost:8080/ws?token=' + token);
+  const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(wsProto + '//' + window.location.host + '/ws?token=' + token);
   ws.onopen = () => { setStatus(true); };
   ws.onclose = () => { setStatus(false); };
   ws.onerror = () => { logMsg('WS ERROR'); };
@@ -305,10 +306,11 @@ function connectWs() {
     try {
       const msg = JSON.parse(e.data);
       if (msg.type === 'message.new') {
-        if (msg.message.senderId === myUserId) return;
-        if (msg.channelId !== channelId) return; // only show for active channel
-        const name = msg.message.senderName || userNames[msg.message.senderId] || msg.message.senderId.substring(0,8);
-        appendMessage(name, msg.message.content, msg.message.createdAt, msg.message.mediaUrl, msg.message.messageType);
+        const d = msg.data || {};
+        if (d.senderId === myUserId) return;
+        if (msg.channelId !== channelId) return;
+        const name = d.senderName || userNames[d.senderId] || (d.senderId || '').substring(0,8);
+        appendMessage(name, d.content, d.createdAt, d.mediaUrl, d.messageType);
       }
     } catch(err) {}
   };
