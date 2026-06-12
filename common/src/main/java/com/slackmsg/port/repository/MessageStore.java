@@ -37,4 +37,8 @@ public interface MessageStore {
      * Check if a message with this idempotency key already exists.
      */
     boolean existsByIdempotencyKey(UUID tenantId, String idempotencyKey);
+
+    List<Message> getThreadReplies(UUID tenantId, UUID channelId, UUID parentMessageId, int limit);
+
+    void incrementReplyCount(UUID parentMessageId);
 }

@@ -98,6 +98,34 @@ check '"success":false' "$CROSS" "Cross-tenant blocked"
 NOAUTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8082/api/v1/channels)
 check "401" "$NOAUTH" "No auth → 401"
 
+echo ""; echo "--- THREADS (8083) ---"
+REPLY=$(curl -s -X POST "http://localhost:8083/api/v1/channels/$CH_ID/messages" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d "{\"content\":\"Thread reply\",\"parentMessageId\":\"$MSG_ID\",\"idempotencyKey\":\"thread-$SLUG\"}")
+check '"success":true' "$REPLY" "Send thread reply"
+check '"parentMessageId"' "$REPLY" "Reply has parentMessageId"
+
+THREAD=$(curl -s "http://localhost:8083/api/v1/channels/$CH_ID/threads/$MSG_ID?limit=10" -H "Authorization: Bearer $TOKEN")
+check '"Thread reply"' "$THREAD" "Get thread replies"
+
+HIST2=$(curl -s "http://localhost:8083/api/v1/channels/$CH_ID/messages?limit=10" -H "Authorization: Bearer $TOKEN")
+REPLY_IN_HIST=$(echo "$HIST2" | grep -c "Thread reply" || true)
+if [ "$REPLY_IN_HIST" = "0" ]; then echo "  ✅ Thread reply excluded from history"; PASS=$((PASS+1)); else echo "  ❌ Thread reply leaked into history"; FAIL=$((FAIL+1)); fi
+
+echo ""; echo "--- REACTIONS (8083) ---"
+REACT=$(curl -s -X POST "http://localhost:8083/api/v1/channels/$CH_ID/messages/$MSG_ID/reactions" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"emoji":"+1"}')
+check '"success":true' "$REACT" "Add reaction"
+
+REACTIONS=$(curl -s "http://localhost:8083/api/v1/channels/$CH_ID/messages/$MSG_ID/reactions" -H "Authorization: Bearer $TOKEN")
+check '"+1"' "$REACTIONS" "Get reactions"
+
+REACT_DUP=$(curl -s -X POST "http://localhost:8083/api/v1/channels/$CH_ID/messages/$MSG_ID/reactions" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"emoji":"+1"}')
+check '"success":false' "$REACT_DUP" "Duplicate reaction blocked"
+
+UNREACT=$(curl -s -X DELETE "http://localhost:8083/api/v1/channels/$CH_ID/messages/$MSG_ID/reactions/+1" -H "Authorization: Bearer $TOKEN")
+check '"success":true' "$UNREACT" "Remove reaction"
+
 echo ""
 echo "═══════════════════════════════════════════"
 echo " Results: $PASS passed, $FAIL failed"

@@ -63,4 +63,14 @@ public class PostgresMessageStore implements MessageStore {
     public boolean existsByIdempotencyKey(UUID tenantId, String idempotencyKey) {
         return jpaRepo.existsByIdempotencyKeyAndTenantId(idempotencyKey, tenantId);
     }
+
+    @Override
+    public List<Message> getThreadReplies(UUID tenantId, UUID channelId, UUID parentMessageId, int limit) {
+        return jpaRepo.findThreadReplies(tenantId, channelId, parentMessageId, PageRequest.of(0, limit));
+    }
+
+    @Override
+    public void incrementReplyCount(UUID parentMessageId) {
+        jpaRepo.incrementReplyCount(parentMessageId);
+    }
 }
