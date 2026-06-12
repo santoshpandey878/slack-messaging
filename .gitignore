@@ -33,3 +33,4 @@ mvnw.cmd
 logs/
 .cd-watcher.pid
 .cd-deploying
+.claude/settings.local.json

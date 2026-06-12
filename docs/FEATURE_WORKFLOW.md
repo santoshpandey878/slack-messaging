@@ -460,7 +460,7 @@ check "$REACTION" "Add reaction"
 
 Complete the **Feature UI Checklist** from FRONTEND_GUIDE.md before moving on.
 
-### Step 14: Build & Run Unit Tests
+### Step 14: Build & Run Unit Tests (LOCAL)
 
 ```bash
 export JAVA_HOME=$(/usr/libexec/java_home -v 11)
@@ -473,33 +473,9 @@ mvn install -N -q && mvn install -pl common -q && mvn package -DskipTests -q
 mvn test
 ```
 
-**If tests fail:** Fix the issue. Do NOT proceed to commit with failing tests.
+**If tests fail:** Fix the issue. Do NOT proceed until all tests pass.
 
-### Step 15: Commit & Push to GitHub
-
-```bash
-# Stage all changes
-git add -A
-
-# Commit with descriptive message
-git commit -m "Add: {feature name}
-
-- {what was added: endpoints, entities, migrations}
-- {tests: N unit tests added}
-- {WS events: event types used}
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
-
-# Push to main
-git push origin main
-```
-
-**Commit message rules:**
-- Start with `Add:` for new features, `Fix:` for bugs, `Update:` for enhancements
-- List what changed (endpoints, entities, migrations, tests)
-- Always include `Co-Authored-By` line
-
-### Step 16: Deploy to Docker & Verify
+### Step 15: Deploy Locally & Verify (LOCAL — before any commit)
 
 ```bash
 # If new migration was added (new table/column): clean deploy
@@ -509,7 +485,6 @@ docker-compose down -v && docker-compose build --quiet && docker-compose up -d
 docker-compose build --quiet && docker-compose up -d
 
 # Wait for all services to be healthy (up to 60s)
-echo "Waiting for services..."
 for i in 1 2 3 4 5 6; do
   sleep 10
   ALL_UP=true
@@ -518,49 +493,127 @@ for i in 1 2 3 4 5 6; do
     [ "$STATUS" != "UP" ] && ALL_UP=false
   done
   if [ "$ALL_UP" = "true" ]; then break; fi
-  echo "  Attempt $i/6..."
 done
 
-# Print final health status
+# ALL 6 must show UP
 for PORT in 8080 8081 8082 8083 8084 8085; do
   STATUS=$(curl -s -m 3 "http://localhost:$PORT/actuator/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "DOWN")
   echo "  :$PORT → $STATUS"
 done
 ```
 
-**ALL 6 services must show UP.** If any service is DOWN, check logs: `docker-compose logs {service-name}`
+**If any service is DOWN:** Check `docker-compose logs {service-name}`. Fix and redeploy. Do NOT commit broken code.
 
-### Step 17: Run E2E Tests & Verify Feature
+### Step 16: Run E2E + Manual Verification (LOCAL — before any commit)
 
 ```bash
 # Run existing E2E suite (must pass — no regressions)
 ./test-e2e.sh
 
-# Manually test the new feature with curl
-# Example: testing a new reaction endpoint
+# Manually test the NEW feature with curl
 TOKEN=$(curl -s http://localhost:8081/api/v1/auth/register -H 'Content-Type: application/json' \
   -d '{"tenantName":"Test","tenantSlug":"test-'$(date +%s)'","email":"a@t.com","displayName":"Admin","password":"pass123"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
 
-# Test the new endpoint
-curl -s http://localhost:8080/api/v1/{your-new-endpoint} \
+# Test each new endpoint — verify happy path + error cases
+curl -s http://localhost:8080/api/v1/{new-endpoint} \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{...}' | python3 -m json.tool
 ```
 
-**If E2E fails:** Fix the regression, re-run unit tests, commit, push, redeploy, re-test. Do NOT leave a broken state.
+**CRITICAL:** Test EVERY new endpoint manually — happy path AND error cases (not member, not found, duplicate, deleted resource). Also verify the frontend (open http://localhost:8080 and test the feature in the UI).
 
-### Step 18: Verify on GitHub
+**If anything fails:** Fix the code, re-run unit tests (Step 14), redeploy (Step 15), re-verify (Step 16). Loop until everything works locally.
+
+### Step 17: Commit & Push to GitHub (only after local verification passes)
 
 ```bash
-# Confirm push landed
-git log --oneline -1
-# Should match your commit
+git add -A
 
-# Confirm CI passes (if GitHub Actions is configured)
-# The CD watcher (if running) will auto-detect the push and redeploy
+git commit -m "Add: {feature name}
+
+- {what was added: endpoints, entities, migrations}
+- {tests: N unit tests added}
+- {WS events: event types used}
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+
+git push origin main
 ```
+
+**Commit rules:**
+- Start with `Add:` for new features, `Fix:` for bugs, `Update:` for enhancements
+- Only commit AFTER local unit tests + E2E + manual verification all pass
+- Never commit broken or untested code
+
+### Step 18: CI (GitHub Actions) — Wait & Fix if Needed
+
+After pushing, GitHub Actions CI runs automatically (.github/workflows/ci.yml):
+1. Builds all modules
+2. Runs unit tests
+3. Runs E2E tests (with PG + Redis service containers)
+
+**Monitor CI:**
+```bash
+# Check CI status (requires gh CLI)
+gh run list --limit 1
+
+# Or check at: https://github.com/santoshpandey878/slack-messaging/actions
+```
+
+**If CI fails:**
+1. Read the failure log: `gh run view --log-failed`
+2. Fix the issue locally
+3. Re-run unit tests + E2E locally
+4. Commit the fix and push again
+5. Wait for CI to pass
+
+**Do NOT proceed until CI is green.**
+
+### Step 19: CD Auto-Deploys Locally
+
+Once CI passes and the push is on `main`, the CD watcher (if running) auto-detects it:
+
+```bash
+# Start CD watcher (if not already running)
+./scripts/cd-watcher.sh &
+
+# CD watcher polls GitHub every 30s:
+# 1. Detects new commit on main
+# 2. git pull
+# 3. mvn package
+# 4. docker-compose build + up
+# 5. Health check
+# 6. Run E2E
+# 7. Log results to logs/cd-watcher.log
+```
+
+If CD watcher is not running, deploy manually:
+```bash
+docker-compose build --quiet && docker-compose up -d
+```
+
+### Step 20: Final Verification — Demo Ready
+
+```bash
+# Confirm deployed version matches latest commit
+curl -s http://localhost:8080/version | python3 -m json.tool
+
+# Run E2E one final time
+./test-e2e.sh
+
+# Open demo UI and verify feature works in browser
+# http://localhost:8080
+```
+
+**Feature is DONE only when:**
+1. All local tests pass (unit + E2E)
+2. Feature verified manually via curl AND browser
+3. Code committed and pushed
+4. CI passes in GitHub Actions
+5. CD deployed locally (or manual deploy)
+6. Final verification passes
 
 ---
 
@@ -584,22 +637,31 @@ After implementing a feature, verify ALL of these BEFORE committing:
 - [ ] **Response format:** `ApiResponse<T>` wrapper, `@JsonInclude(NON_NULL)`
 - [ ] **Pagination:** Limit clamped to [1, 100] for list endpoints
 
-### Pipeline
+### Local Verification (BEFORE commit)
 - [ ] **Unit tests pass:** `mvn test` — 0 failures
-- [ ] **Committed:** `git add -A && git commit`
-- [ ] **Pushed:** `git push origin main`
-- [ ] **Docker deployed:** `docker-compose build && up -d`
+- [ ] **Docker deployed locally:** `docker-compose build && up -d`
 - [ ] **All 6 services healthy:** health check on ports 8080-8085
 - [ ] **E2E tests pass:** `./test-e2e.sh` — 0 failures
-- [ ] **New feature manually verified:** curl test against the new endpoint
+- [ ] **New feature manually tested:** curl test every new endpoint (happy + error paths)
+- [ ] **Frontend tested:** open http://localhost:8080, test feature in browser
 - [ ] **No regressions:** existing E2E checks still pass
+
+### Git + CI/CD (AFTER local verification)
+- [ ] **Committed:** `git add -A && git commit`
+- [ ] **Pushed:** `git push origin main`
+- [ ] **CI passes:** GitHub Actions build + test green
+- [ ] **CI fix:** if CI fails, fix locally, re-verify, push fix
+- [ ] **CD deployed:** cd-watcher auto-deploys OR manual `docker-compose up -d`
+- [ ] **Final verification:** E2E + demo UI on deployed version
 
 ### Definition of Done
 A feature is COMPLETE only when:
-1. Code is written following all quality standards
-2. Unit tests written and passing
-3. Committed and pushed to GitHub (main branch)
-4. Docker containers rebuilt and deployed
-5. All services healthy
-6. E2E tests pass (including new test cases for the feature)
-7. Feature manually verified via curl or demo UI
+1. Code written following all quality standards
+2. Unit tests written and passing locally
+3. Docker deployed and all 6 services healthy locally
+4. E2E tests pass locally (including new test cases)
+5. Feature manually verified via curl AND browser demo UI
+6. Committed and pushed to GitHub
+7. CI (GitHub Actions) passes — if fails, fix and re-push
+8. CD auto-deploys locally (or manual deploy after CI)
+9. Final E2E + demo verification on deployed version

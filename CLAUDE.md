@@ -142,61 +142,64 @@ done
 
 ## Full Pipeline — MANDATORY for Every Feature
 
-Every feature MUST complete this entire pipeline. Do NOT stop at just writing code.
+Every feature MUST complete this entire pipeline. Do NOT stop at writing code. Do NOT commit until locally verified.
 
 ```
-Code → Unit Tests → Commit → Push → Docker Deploy → Health Check → E2E → Verify
+PHASE 1 — LOCAL (verify everything works before committing):
+  Code → Unit Tests → Docker Deploy → Health Check → E2E → Manual Curl Test → Frontend Test
+
+PHASE 2 — GIT + CI/CD (only after Phase 1 passes):
+  Commit → Push → CI (GitHub Actions) → Fix if CI fails → CD auto-deploys → Final verify
 ```
 
-### 1. Build & Test
+### Phase 1: Local Development & Verification
+
 ```bash
+# 1. Build + unit tests
 mvn install -N -q && mvn install -pl common -q && mvn package -DskipTests -q
 mvn test    # ALL tests must pass
+
+# 2. Deploy to Docker locally
+docker-compose down -v && docker-compose build --quiet && docker-compose up -d  # clean deploy if migration
+# OR: docker-compose build --quiet && docker-compose up -d                      # quick deploy if no migration
+
+# 3. Health check — all 6 services must be UP
+sleep 15
+for PORT in 8080 8081 8082 8083 8084 8085; do
+  curl -s -m 3 "http://localhost:$PORT/actuator/health" | python3 -c "import sys,json; print(':$PORT →', json.load(sys.stdin).get('status','DOWN'))" 2>/dev/null
+done
+
+# 4. E2E tests — no regressions
+./test-e2e.sh
+
+# 5. Manual curl test — EVERY new endpoint (happy + error paths)
+
+# 6. Frontend test — open http://localhost:8080 and verify in browser
 ```
 
-### 2. Commit & Push
+**Do NOT proceed to Phase 2 until ALL of Phase 1 passes.** If anything fails, fix and re-verify locally.
+
+### Phase 2: Commit, CI, CD
+
 ```bash
+# 7. Commit (only after local verification)
 git add -A
 git commit -m "Add: {feature name}
 
-- {what changed: endpoints, entities, migrations, tests}
+- {endpoints, entities, tests}
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 
+# 8. Push — triggers CI
 git push origin main
+
+# 9. Monitor CI: gh run list --limit 1
+# If CI fails: fix locally, re-verify Phase 1, push fix
+
+# 10. CD watcher auto-deploys (or manual: docker-compose build && up -d)
+
+# 11. Final E2E on deployed version
+./test-e2e.sh
 ```
 
-### 3. Deploy to Docker
-```bash
-# With new migration (new table/column):
-docker-compose down -v && docker-compose build --quiet && docker-compose up -d
-
-# Without migration change:
-docker-compose build --quiet && docker-compose up -d
-```
-
-### 4. Health Check (wait up to 60s)
-```bash
-for i in 1 2 3 4 5 6; do
-  sleep 10
-  ALL_UP=true
-  for PORT in 8080 8081 8082 8083 8084 8085; do
-    STATUS=$(curl -s -m 3 "http://localhost:$PORT/actuator/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "DOWN")
-    [ "$STATUS" != "UP" ] && ALL_UP=false
-  done
-  if [ "$ALL_UP" = "true" ]; then break; fi
-done
-```
-
-### 5. E2E Test
-```bash
-./test-e2e.sh    # ALL checks must pass (no regressions)
-```
-
-### 6. Verify New Feature
-```bash
-# Manually curl the new endpoint to confirm it works
-```
-
-**A feature is NOT done until all 6 steps complete successfully.**
-**If any step fails, fix it before proceeding to the next feature.**
+**A feature is NOT done until CI passes and the deployed version is verified.**
