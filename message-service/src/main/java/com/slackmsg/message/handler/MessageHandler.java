@@ -43,15 +43,6 @@ public class MessageHandler {
         return ResponseEntity.ok(ApiResponse.ok(messages));
     }
 
-    @GetMapping("/channels/{channelId}/threads/{messageId}")
-    public ResponseEntity<ApiResponse<List<MessageResponse>>> getThreadReplies(
-            @PathVariable UUID channelId,
-            @PathVariable UUID messageId,
-            @RequestParam(defaultValue = "50") int limit) {
-        List<MessageResponse> replies = messageService.getThreadReplies(channelId, messageId, limit);
-        return ResponseEntity.ok(ApiResponse.ok(replies));
-    }
-
     @PostMapping("/channels/{channelId}/read")
     public ResponseEntity<ApiResponse<Void>> markAsRead(
             @PathVariable UUID channelId,
