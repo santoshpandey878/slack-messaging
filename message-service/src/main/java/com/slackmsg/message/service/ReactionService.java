@@ -48,6 +48,11 @@ public class ReactionService {
             throw new IllegalArgumentException("Cannot react to a deleted message");
         }
 
+        // Check for duplicate before saving (avoids DataIntegrityViolation escaping transaction)
+        if (reactionRepo.existsByMessageIdAndUserIdAndEmoji(messageId, userId, req.getEmoji())) {
+            throw new IllegalArgumentException("Already reacted with this emoji");
+        }
+
         Reaction reaction = Reaction.builder()
                 .tenantId(tenantId).channelId(channelId).messageId(messageId)
                 .userId(userId).emoji(req.getEmoji()).build();
@@ -55,6 +60,7 @@ public class ReactionService {
         try {
             reaction = reactionRepo.save(reaction);
         } catch (DataIntegrityViolationException e) {
+            // Concurrent duplicate — race condition handled
             throw new IllegalArgumentException("Already reacted with this emoji");
         }
 
