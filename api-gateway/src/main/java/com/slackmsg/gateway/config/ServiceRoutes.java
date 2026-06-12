@@ -33,7 +33,6 @@ public class ServiceRoutes {
             // Channel-level endpoints go to channel-service
             // BUT /channels/{id}/messages goes to message-service
             if (path.matches("/api/v1/channels/[^/]+/messages.*")
-                || path.matches("/api/v1/channels/[^/]+/threads.*")
                 || path.matches("/api/v1/channels/[^/]+/read")
                 || path.startsWith("/api/v1/unread")) {
                 return messageUrl;
