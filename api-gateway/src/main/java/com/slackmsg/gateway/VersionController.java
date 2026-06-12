@@ -8,6 +8,6 @@ import java.util.Map;
 public class VersionController {
     @GetMapping("/version")
     public Map<String, String> version() {
-        return Map.of("version", "1.1.0", "service", "api-gateway", "status", "cd-deployed");
+        return Map.of("version", "2.0.0", "service", "api-gateway", "status", "cd-deployed", "features", "threads,reactions");
     }
 }
