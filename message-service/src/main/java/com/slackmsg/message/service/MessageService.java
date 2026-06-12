@@ -2,15 +2,12 @@ package com.slackmsg.message.service;
 
 import com.slackmsg.domain.entity.Message;
 import com.slackmsg.domain.enums.MessageType;
-import com.slackmsg.domain.enums.WsEventType;
 import com.slackmsg.dto.request.SendMessageRequest;
 import com.slackmsg.dto.response.MessageResponse;
 import com.slackmsg.port.repository.MessageStore;
 import com.slackmsg.port.service.ChannelServicePort;
 import com.slackmsg.port.service.MessageServicePort;
 import com.slackmsg.util.TenantContext;
-import com.slackmsg.util.WsPayloadBuilder;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,6 +17,15 @@ import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Message business logic — clean, focused responsibilities:
+ *   - Validate (membership, content)
+ *   - Persist (via MessageStore port)
+ *   - Delegate fan-out (to FanoutService)
+ *   - Delegate idempotency (to IdempotencyService)
+ *
+ * Does NOT handle: caching, unread counts, rate limiting, auth.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -29,7 +35,6 @@ public class MessageService implements MessageServicePort {
     private final ChannelServicePort channelService;
     private final IdempotencyService idempotencyService;
     private final FanoutService fanoutService;
-    private final ObjectMapper objectMapper;
 
     @Transactional
     public MessageResponse sendMessage(UUID channelId, SendMessageRequest req) {
@@ -39,13 +44,13 @@ public class MessageService implements MessageServicePort {
 
         validateMembership(channelId, userId);
         validateContent(req);
-        validateThreadParent(tenantId, channelId, req.getParentMessageId());
 
-        // Idempotency check
+        // Idempotency check — delegate to IdempotencyService
         Optional<String> cached = idempotencyService.checkDuplicate(tenantId, userId, req.getIdempotencyKey());
         if (cached.isPresent()) {
             MessageResponse cachedResponse = resolveCachedMessage(tenantId, userId, req.getIdempotencyKey(), cached.get());
             if (cachedResponse != null) return cachedResponse;
+            // Cache stale (message deleted) — clear and proceed as new message
             idempotencyService.clearStale(tenantId, userId, req.getIdempotencyKey());
         }
 
@@ -55,17 +60,11 @@ public class MessageService implements MessageServicePort {
         // Cache idempotency
         idempotencyService.markCompleted(tenantId, userId, req.getIdempotencyKey(), message.getId().toString());
 
-        // If thread reply: increment parent's reply_count (atomic SQL)
-        if (req.getParentMessageId() != null) {
-            messageStore.incrementReplyCount(req.getParentMessageId());
-        }
-
-        // Fan-out (best-effort)
+        // Fan-out (best-effort — failure doesn't fail the send)
         triggerFanout(tenantId, channelId, message, userId, senderName);
 
-        log.info("Message sent: msgId={} channelId={} senderId={} type={} thread={}",
-                message.getId(), channelId, userId, message.getMessageType(),
-                req.getParentMessageId() != null ? req.getParentMessageId() : "none");
+        log.info("Message sent: msgId={} channelId={} senderId={} type={}",
+                message.getId(), channelId, userId, message.getMessageType());
 
         return MessageResponse.from(message);
     }
@@ -74,39 +73,13 @@ public class MessageService implements MessageServicePort {
     public List<MessageResponse> getHistory(UUID channelId, Instant beforeCursor, int limit) {
         UUID tenantId = TenantContext.getTenantId();
         UUID userId = TenantContext.getUserId();
+
         validateMembership(channelId, userId);
         limit = Math.max(1, Math.min(limit, 100));
 
         return messageStore.getHistory(tenantId, channelId, beforeCursor, limit).stream()
                 .map(MessageResponse::from)
                 .collect(Collectors.toList());
-    }
-
-    @Transactional(readOnly = true)
-    public List<MessageResponse> getThreadReplies(UUID channelId, UUID parentMessageId,
-                                                   Instant afterCursor, int limit) {
-        UUID tenantId = TenantContext.getTenantId();
-        UUID userId = TenantContext.getUserId();
-        validateMembership(channelId, userId);
-        limit = Math.max(1, Math.min(limit, 100));
-
-        // Validate parent exists
-        Message parent = messageStore.findById(tenantId, parentMessageId)
-                .orElseThrow(() -> new IllegalArgumentException("Parent message not found"));
-        if (!parent.getChannelId().equals(channelId)) {
-            throw new IllegalArgumentException("Message does not belong to this channel");
-        }
-
-        List<MessageResponse> replies = messageStore.getThreadReplies(tenantId, channelId, parentMessageId, afterCursor, limit)
-                .stream().map(MessageResponse::from).collect(Collectors.toList());
-
-        // Include parent as first item for context
-        List<MessageResponse> result = new ArrayList<>();
-        if (afterCursor == null) {
-            result.add(MessageResponse.from(parent));
-        }
-        result.addAll(replies);
-        return result;
     }
 
     // ═══ MessageServicePort (cross-module) ═══
@@ -117,7 +90,7 @@ public class MessageService implements MessageServicePort {
         return messageStore.getMessagesAfter(tenantId, channelId, afterMessageId, limit);
     }
 
-    // ═══ Private helpers ═══
+    // ═══ Private helpers — each does ONE thing ═══
 
     private void validateMembership(UUID channelId, UUID userId) {
         if (!channelService.isMember(channelId, userId)) {
@@ -131,47 +104,35 @@ public class MessageService implements MessageServicePort {
         }
     }
 
-    private void validateThreadParent(UUID tenantId, UUID channelId, UUID parentMessageId) {
-        if (parentMessageId == null) return;
-        Message parent = messageStore.findById(tenantId, parentMessageId)
-                .orElseThrow(() -> new IllegalArgumentException("Parent message not found"));
-        if (!parent.getChannelId().equals(channelId)) {
-            throw new IllegalArgumentException("Parent message does not belong to this channel");
-        }
-        if (parent.getParentMessageId() != null) {
-            throw new IllegalArgumentException("Cannot reply to a thread reply — reply to the parent message instead");
-        }
-    }
-
     private MessageResponse resolveCachedMessage(UUID tenantId, UUID userId, String idempotencyKey, String cachedId) {
         return messageStore.findById(tenantId, UUID.fromString(cachedId))
-                .map(MessageResponse::from).orElse(null);
+                .map(MessageResponse::from)
+                .orElse(null); // null signals "cache stale, proceed as new message"
     }
 
     private Message persistMessage(UUID tenantId, UUID channelId, UUID userId, String senderName, SendMessageRequest req) {
         MessageType msgType = req.hasMedia() ? MessageType.MEDIA : MessageType.TEXT;
+
         return messageStore.save(Message.builder()
-                .tenantId(tenantId).channelId(channelId).senderId(userId).senderName(senderName)
-                .content(req.getContent()).messageType(msgType)
-                .mediaUrl(req.getMediaUrl()).mediaType(req.getMediaType())
+                .tenantId(tenantId)
+                .channelId(channelId)
+                .senderId(userId)
+                .senderName(senderName)
+                .content(req.getContent())
+                .messageType(msgType)
+                .mediaUrl(req.getMediaUrl())
+                .mediaType(req.getMediaType())
                 .idempotencyKey(req.getIdempotencyKey())
-                .parentMessageId(req.getParentMessageId())
-                .createdAt(Instant.now()).build());
+                .createdAt(Instant.now())
+                .build());
     }
 
     private void triggerFanout(UUID tenantId, UUID channelId, Message message, UUID senderId, String senderName) {
         try {
-            if (message.getParentMessageId() != null) {
-                // Thread reply — use thread.reply event type
-                String payload = WsPayloadBuilder.buildThreadReply(
-                        message, senderName, message.getParentMessageId(), objectMapper);
-                fanoutService.fanoutEvent(tenantId, channelId, payload, senderId, false);
-            } else {
-                // Top-level message — use message.new event type
-                fanoutService.fanout(tenantId, channelId, message, senderId, senderName);
-            }
+            fanoutService.fanout(tenantId, channelId, message, senderId, senderName);
         } catch (Exception e) {
-            log.error("Fan-out failed for msgId={}: {}", message.getId(), e.getMessage());
+            log.error("Fan-out failed for msgId={} channelId={}: {}. Recipients will catch up via sync.",
+                    message.getId(), channelId, e.getMessage());
         }
     }
 }

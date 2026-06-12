@@ -1,17 +1,24 @@
 package com.slackmsg.message.adapter.postgres;
 
 import com.slackmsg.domain.entity.Message;
+import com.slackmsg.message.adapter.postgres.MessageRepository;
 import com.slackmsg.port.repository.MessageStore;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+/**
+ * PostgreSQL implementation of MessageStore.
+ * Uses Spring Data JPA underneath.
+ *
+ * To swap to Cassandra: create CassandraMessageStore implementing MessageStore.
+ * Business logic (MessageService) stays untouched.
+ */
 @Component
 @RequiredArgsConstructor
 public class PostgresMessageStore implements MessageStore {
@@ -40,11 +47,14 @@ public class PostgresMessageStore implements MessageStore {
 
     @Override
     public List<Message> getMessagesAfter(UUID tenantId, UUID channelId, UUID afterMessageId, int limit) {
+        // Validate that afterMessageId exists — if not, the subquery returns NULL
+        // and the comparison `createdAt > NULL` silently returns empty list
         boolean exists = jpaRepo.findById(afterMessageId)
                 .filter(m -> m.getTenantId().equals(tenantId) && m.getChannelId().equals(channelId))
                 .isPresent();
         if (!exists) {
-            return Collections.emptyList();
+            // afterMessageId not found — return empty (client has stale cursor)
+            return java.util.Collections.emptyList();
         }
         return jpaRepo.findMessagesAfter(tenantId, channelId, afterMessageId, PageRequest.of(0, limit));
     }
@@ -52,20 +62,5 @@ public class PostgresMessageStore implements MessageStore {
     @Override
     public boolean existsByIdempotencyKey(UUID tenantId, String idempotencyKey) {
         return jpaRepo.existsByIdempotencyKeyAndTenantId(idempotencyKey, tenantId);
-    }
-
-    @Override
-    public List<Message> getThreadReplies(UUID tenantId, UUID channelId, UUID parentMessageId,
-                                           Instant afterCursor, int limit) {
-        PageRequest page = PageRequest.of(0, limit);
-        if (afterCursor == null) {
-            return jpaRepo.findThreadReplies(tenantId, channelId, parentMessageId, page);
-        }
-        return jpaRepo.findThreadRepliesAfterCursor(tenantId, channelId, parentMessageId, afterCursor, page);
-    }
-
-    @Override
-    public void incrementReplyCount(UUID messageId) {
-        jpaRepo.incrementReplyCount(messageId);
     }
 }

@@ -37,14 +37,4 @@ public interface MessageStore {
      * Check if a message with this idempotency key already exists.
      */
     boolean existsByIdempotencyKey(UUID tenantId, String idempotencyKey);
-
-    /**
-     * Get thread replies for a parent message (oldest first — ASC).
-     */
-    List<Message> getThreadReplies(UUID tenantId, UUID channelId, UUID parentMessageId, Instant afterCursor, int limit);
-
-    /**
-     * Atomic increment of reply_count on a parent message.
-     */
-    void incrementReplyCount(UUID messageId);
 }

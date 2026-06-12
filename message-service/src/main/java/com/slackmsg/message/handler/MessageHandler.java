@@ -51,16 +51,6 @@ public class MessageHandler {
         return ResponseEntity.ok(ApiResponse.ok("Marked as read", null));
     }
 
-    @GetMapping("/channels/{channelId}/threads/{parentMessageId}")
-    public ResponseEntity<ApiResponse<List<MessageResponse>>> getThreadReplies(
-            @PathVariable UUID channelId,
-            @PathVariable UUID parentMessageId,
-            @RequestParam(required = false) Instant after,
-            @RequestParam(defaultValue = "50") int limit) {
-        List<MessageResponse> replies = messageService.getThreadReplies(channelId, parentMessageId, after, limit);
-        return ResponseEntity.ok(ApiResponse.ok(replies));
-    }
-
     @GetMapping("/unread")
     public ResponseEntity<ApiResponse<Map<String, String>>> getUnreadCounts() {
         Map<String, String> counts = unreadService.getCounts(TenantContext.getTenantId(), TenantContext.getUserId());
