@@ -448,7 +448,17 @@ check "$REACTION" "Add reaction"
 
 **File:** `api-gateway/src/main/resources/static/index.html`
 
-Add UI elements for the new feature following existing patterns in the HTML.
+**Read `docs/FRONTEND_GUIDE.md` first** — it has exact patterns for:
+- Adding API call functions (use `api()` helper)
+- Handling new WS event types in `ws.onmessage`
+- Adding UI panels (modal dialogs)
+- Adding sidebar/topbar buttons
+- Updating message rendering (edited indicator, thread count, reactions)
+- Typing indicator display
+- CSS variables (use vars, don't hardcode colors)
+- XSS prevention (always `escapeHtml()`)
+
+Complete the **Feature UI Checklist** from FRONTEND_GUIDE.md before moving on.
 
 ### Step 14: Build & Run Unit Tests
 

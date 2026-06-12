@@ -41,9 +41,15 @@ When implementing a feature, read docs in this order:
 ### 3. Build the Feature
 | Doc | What You Learn |
 |-----|---------------|
-| [docs/FEATURE_WORKFLOW.md](docs/FEATURE_WORKFLOW.md) | **The 14-step cookbook.** Pre-flight checklist → migration → entity → repo → DTO → service → handler → route → WS event → internal API → tests → E2E → UI → deploy |
+| [docs/FEATURE_WORKFLOW.md](docs/FEATURE_WORKFLOW.md) | **The 18-step cookbook.** Code → test → commit → push → Docker deploy → health check → E2E → verify. Full pipeline enforced. |
 
-### 4. Reference (as needed)
+### 4. Frontend & NFR
+| Doc | What You Learn |
+|-----|---------------|
+| [docs/FRONTEND_GUIDE.md](docs/FRONTEND_GUIDE.md) | HTML demo client patterns: API calls, WS event handlers, UI panels, message rendering, typing indicators, CSS variables, security (XSS prevention) |
+| [docs/NFR_GUIDE.md](docs/NFR_GUIDE.md) | Non-functional requirements: performance, monitoring, rate limiting, data retention, caching, bulk operations, security hardening, scalability, load testing |
+
+### 5. Reference (as needed)
 | Doc | What You Learn |
 |-----|---------------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System overview, hexagonal layers, service boundaries, message delivery flow |
