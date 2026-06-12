@@ -553,9 +553,20 @@ curl -s http://localhost:8080/api/v1/{new-endpoint} \
 
 **File:** `README.md`
 
-- **Adding a feature:** Add it to the features list in README.md
-- **Removing a feature:** Remove it from README.md
+- **Adding a feature:** Add it to the features list AND add a "How to Test" section with step-by-step demo instructions
+- **Removing a feature:** Remove it from the features list AND remove its test instructions
 - This is NOT optional — README must always reflect the current state of the system before committing
+
+**How to Test section format:**
+```markdown
+### How to Test: {Feature Name}
+1. Open http://localhost:8080
+2. Login/Register as User A
+3. {Step-by-step instructions to demo the feature}
+4. {Expected result at each step}
+5. (Optional) Open incognito tab, login as User B, verify multi-user behavior
+```
+These instructions serve as the **demo script** — during the Harinder call, follow these steps to showcase the feature.
 
 ### Step 17: Commit & Push to GitHub (only after local verification passes)
 
