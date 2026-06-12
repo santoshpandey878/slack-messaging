@@ -8,14 +8,37 @@ This document contains EVERYTHING needed to build any feature without asking que
 
 Before writing any code for a new feature:
 
-1. **Read DOMAIN_KNOWLEDGE.md** — understand what the feature IS, how Slack does it, edge cases
-2. **Read TRADEOFFS.md** — every architectural decision is pre-made, follow them
-3. **Read CODE_QUALITY.md** — quality standards, anti-patterns, validation rules
-4. **Read EDGE_CASES.md** — race conditions, null handling, failure scenarios
-5. **Identify the owning service** (see table below)
-6. **Check if DB columns/tables already exist** in V4 migration (many are pre-built)
-7. **Check if WS event type already exists** in WsEventType enum
-8. **Check if WsPayloadBuilder method already exists**
+1. **Ensure CD watcher is running:**
+```bash
+# Check if already running
+if [ -f .cd-watcher.pid ] && kill -0 $(cat .cd-watcher.pid) 2>/dev/null; then
+  echo "CD Watcher running (PID $(cat .cd-watcher.pid))"
+else
+  echo "Starting CD Watcher..."
+  ./scripts/cd-watcher.sh &
+  sleep 2
+  echo "CD Watcher started (PID $(cat .cd-watcher.pid))"
+fi
+```
+**The CD watcher MUST be running before any feature work begins.** It auto-deploys after push.
+
+2. **Ensure all services are healthy:**
+```bash
+for PORT in 8080 8081 8082 8083 8084 8085; do
+  STATUS=$(curl -s -m 3 "http://localhost:$PORT/actuator/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "DOWN")
+  echo "  :$PORT → $STATUS"
+done
+```
+If any service is DOWN, fix before starting feature work.
+
+3. **Read DOMAIN_KNOWLEDGE.md** — understand what the feature IS, how Slack does it, edge cases
+4. **Read TRADEOFFS.md** — every architectural decision is pre-made, follow them
+5. **Read CODE_QUALITY.md** — quality standards, anti-patterns, validation rules
+6. **Read EDGE_CASES.md** — race conditions, null handling, failure scenarios
+7. **Identify the owning service** (see table below)
+8. **Check if DB columns/tables already exist** in V4 migration (many are pre-built)
+9. **Check if WS event type already exists** in WsEventType enum
+10. **Check if WsPayloadBuilder method already exists**
 
 ### Service Ownership
 
@@ -571,49 +594,69 @@ gh run list --limit 1
 
 **Do NOT proceed until CI is green.**
 
-### Step 19: CD Auto-Deploys Locally
+### Step 19: CD Auto-Deploys Locally (MANDATORY — wait for it)
 
-Once CI passes and the push is on `main`, the CD watcher (if running) auto-detects it:
+The CD watcher (started in Pre-Flight) auto-detects the push within 30 seconds:
+1. Detects new commit on main
+2. `git pull`
+3. `mvn package`
+4. `docker-compose build + up`
+5. Health check (all 6 services)
+6. Run E2E tests
+7. Log results to `logs/cd-watcher.log`
 
+**Wait for CD to complete and verify:**
 ```bash
-# Start CD watcher (if not already running)
-./scripts/cd-watcher.sh &
+# Wait up to 120s for CD to finish deploying
+echo "Waiting for CD watcher to deploy..."
+for i in $(seq 1 12); do
+  sleep 10
+  if tail -5 logs/cd-watcher.log 2>/dev/null | grep -q "DEPLOY SUCCESS"; then
+    echo "CD deployment successful!"
+    break
+  fi
+  echo "  Waiting... ($((i*10))s)"
+done
 
-# CD watcher polls GitHub every 30s:
-# 1. Detects new commit on main
-# 2. git pull
-# 3. mvn package
-# 4. docker-compose build + up
-# 5. Health check
-# 6. Run E2E
-# 7. Log results to logs/cd-watcher.log
+# Show CD result
+tail -10 logs/cd-watcher.log
 ```
 
-If CD watcher is not running, deploy manually:
-```bash
-docker-compose build --quiet && docker-compose up -d
-```
+**If CD fails:** Check `logs/cd-watcher.log` for the error. Fix locally, push again.
 
-### Step 20: Final Verification — Demo Ready
+### Step 20: Final Verification on CD-Deployed Version — Demo Ready
 
 ```bash
-# Confirm deployed version matches latest commit
+# 1. Confirm CD deployed the latest commit
+echo "Deployed version:"
 curl -s http://localhost:8080/version | python3 -m json.tool
 
-# Run E2E one final time
+# 2. Confirm git commit matches
+echo "Latest commit:"
+git log --oneline -1
+
+# 3. E2E on CD-deployed version (not local build — the CD-built version)
 ./test-e2e.sh
 
-# Open demo UI and verify feature works in browser
-# http://localhost:8080
+# 4. Quick-test the new feature on CD-deployed version
+TOKEN=$(curl -s http://localhost:8081/api/v1/auth/register -H 'Content-Type: application/json' \
+  -d '{"tenantName":"CDVerify","tenantSlug":"cd-'$(date +%s)'","email":"a@t.com","displayName":"Admin","password":"pass123"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
+# Test new endpoints on CD-deployed version...
+
+# 5. Demo ready
+echo "Demo ready at: http://localhost:8080"
 ```
 
-**Feature is DONE only when:**
-1. All local tests pass (unit + E2E)
-2. Feature verified manually via curl AND browser
-3. Code committed and pushed
-4. CI passes in GitHub Actions
-5. CD deployed locally (or manual deploy)
-6. Final verification passes
+**Feature is DONE only when ALL of these are true:**
+1. Unit tests pass locally (Phase 1)
+2. Feature verified via curl AND browser locally (Phase 1)
+3. Committed and pushed to GitHub
+4. CI (GitHub Actions) green — checked via `gh run list`
+5. CD watcher auto-deployed — confirmed in `logs/cd-watcher.log` showing "DEPLOY SUCCESS"
+6. `/version` endpoint returns latest on CD-deployed instance
+7. E2E passes on CD-deployed version (18+ checks, 0 failed)
+8. New feature works on CD-deployed version (curl verified)
 
 ---
 
@@ -649,10 +692,12 @@ After implementing a feature, verify ALL of these BEFORE committing:
 ### Git + CI/CD (AFTER local verification)
 - [ ] **Committed:** `git add -A && git commit`
 - [ ] **Pushed:** `git push origin main`
-- [ ] **CI passes:** GitHub Actions build + test green
-- [ ] **CI fix:** if CI fails, fix locally, re-verify, push fix
-- [ ] **CD deployed:** cd-watcher auto-deploys OR manual `docker-compose up -d`
-- [ ] **Final verification:** E2E + demo UI on deployed version
+- [ ] **CI passes:** `gh run list --limit 1` shows success
+- [ ] **CI fix:** if CI fails, fix locally, re-verify, push fix, re-check CI
+- [ ] **CD auto-deployed:** `tail -10 logs/cd-watcher.log` shows "DEPLOY SUCCESS"
+- [ ] **Version verified:** `curl http://localhost:8080/version` shows latest
+- [ ] **E2E on CD version:** `./test-e2e.sh` — 0 failures on CD-deployed build
+- [ ] **Feature on CD version:** curl test new endpoints on CD-deployed build
 
 ### Definition of Done
 A feature is COMPLETE only when:
@@ -662,6 +707,8 @@ A feature is COMPLETE only when:
 4. E2E tests pass locally (including new test cases)
 5. Feature manually verified via curl AND browser demo UI
 6. Committed and pushed to GitHub
-7. CI (GitHub Actions) passes — if fails, fix and re-push
-8. CD auto-deploys locally (or manual deploy after CI)
-9. Final E2E + demo verification on deployed version
+7. CI (GitHub Actions) green — `gh run list` confirmed
+8. CD watcher auto-deployed — `logs/cd-watcher.log` shows DEPLOY SUCCESS
+9. `/version` endpoint confirms latest version on CD-deployed instance
+10. E2E passes on CD-deployed version
+11. Feature verified on CD-deployed version — demo ready

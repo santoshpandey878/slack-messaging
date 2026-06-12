@@ -152,6 +152,25 @@ PHASE 2 — GIT + CI/CD (only after Phase 1 passes):
   Commit → Push → CI (GitHub Actions) → Fix if CI fails → CD auto-deploys → Final verify
 ```
 
+### Phase 0: Pre-Flight (before any code)
+
+```bash
+# Ensure CD watcher is running
+if [ -f .cd-watcher.pid ] && kill -0 $(cat .cd-watcher.pid) 2>/dev/null; then
+  echo "CD Watcher running (PID $(cat .cd-watcher.pid))"
+else
+  ./scripts/cd-watcher.sh &
+  sleep 2
+  echo "CD Watcher started (PID $(cat .cd-watcher.pid))"
+fi
+
+# Ensure all services are healthy
+for PORT in 8080 8081 8082 8083 8084 8085; do
+  STATUS=$(curl -s -m 3 "http://localhost:$PORT/actuator/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "DOWN")
+  echo "  :$PORT → $STATUS"
+done
+```
+
 ### Phase 1: Local Development & Verification
 
 ```bash
@@ -190,16 +209,30 @@ git commit -m "Add: {feature name}
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 
-# 8. Push — triggers CI
+# 8. Push — triggers CI + CD
 git push origin main
 
-# 9. Monitor CI: gh run list --limit 1
-# If CI fails: fix locally, re-verify Phase 1, push fix
+# 9. Monitor CI
+gh run list --limit 1
+# If CI fails: fix locally, re-verify Phase 1, push fix, re-check CI
 
-# 10. CD watcher auto-deploys (or manual: docker-compose build && up -d)
+# 10. Wait for CD watcher to auto-deploy (polls every 30s)
+for i in $(seq 1 12); do
+  sleep 10
+  if tail -5 logs/cd-watcher.log 2>/dev/null | grep -q "DEPLOY SUCCESS"; then
+    echo "CD deployed!"; break
+  fi
+done
+tail -10 logs/cd-watcher.log
 
-# 11. Final E2E on deployed version
+# 11. Verify CD-deployed version
+curl -s http://localhost:8080/version | python3 -m json.tool
+
+# 12. Final E2E on CD-deployed version
 ./test-e2e.sh
+
+# 13. Verify feature works on CD-deployed version
+# curl test new endpoints...
 ```
 
-**A feature is NOT done until CI passes and the deployed version is verified.**
+**A feature is NOT done until CI passes, CD auto-deploys, and the CD-deployed version is verified.**
