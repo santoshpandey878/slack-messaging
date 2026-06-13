@@ -314,6 +314,9 @@ function connectWs() {
         const name = d.senderName || userNames[d.senderId] || (d.senderId || '').substring(0,8);
         appendMessage(name, d.content, d.createdAt, d.mediaUrl, d.messageType);
       }
+      if (msg.type === 'member.joined' || msg.type === 'member.left') {
+        listChannels();
+      }
     } catch(err) {}
   };
 }
@@ -449,9 +452,6 @@ function appendMessage(sender, content, time, mediaUrl, messageType) {
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
 }
-
-// Auto-refresh channel list every 15s (picks up new channels, DMs, membership changes)
-setInterval(() => { if (token) listChannels(); }, 15000);
 
 // Auto-show auth panel on load
 window.onload = () => showPanel('authPanel');
