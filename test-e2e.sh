@@ -129,6 +129,7 @@ check "$MSG_ID" "$PINS" "List pins"
 UNPIN=$(curl -s -X DELETE "http://localhost:8083/api/v1/channels/$CH_ID/pins/$MSG_ID" -H "Authorization: Bearer $TOKEN")
 check '"success":true' "$UNPIN" "Unpin message"
 
+sleep 2  # rate limit cooldown
 echo ""; echo "--- SEARCH (8083) ---"
 SEARCH=$(curl -s "http://localhost:8083/api/v1/channels/$CH_ID/search?q=E2E&limit=10" -H "Authorization: Bearer $TOKEN")
 check '"E2E test message"' "$SEARCH" "Search messages"
