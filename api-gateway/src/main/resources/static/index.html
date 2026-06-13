@@ -29,6 +29,8 @@
   .channel-list li { padding: 4px 16px 4px 24px; font-size: 14px; color: var(--text-secondary); cursor: pointer; border-radius: 4px; margin: 0 8px; }
   .channel-list li:hover { background: var(--bg-hover); color: #fff; }
   .channel-list li.active { background: var(--accent); color: #fff; }
+  .channel-list li .unread-badge { background: var(--red); color: #fff; font-size: 10px; font-weight: 900; padding: 1px 6px; border-radius: 10px; margin-left: 6px; }
+  .channel-list li.has-unread { color: #fff; font-weight: 900; }
   .channel-list li .ch-icon { margin-right: 6px; font-size: 12px; }
   .sidebar-actions { padding: 8px 16px; }
   .sidebar-actions button { width: 100%; padding: 6px; font-size: 12px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; margin-bottom: 4px; }
@@ -317,17 +319,20 @@ function connectWs() {
 }
 
 async function listChannels() {
-  const r = await api('GET', '/api/v1/channels');
+  const [r, u] = await Promise.all([api('GET', '/api/v1/channels'), api('GET', '/api/v1/unread')]);
   if (!r.success) return;
   channels = r.data;
+  const unread = (u.success && u.data) ? u.data : {};
   const list = document.getElementById('channelList');
   list.innerHTML = '';
   r.data.forEach(c => {
     const li = document.createElement('li');
     const icon = c.type === 'DM' ? '\uD83D\uDCAC' : c.type === 'PRIVATE' ? '\uD83D\uDD12' : '#';
-    li.textContent = icon + ' ' + (c.name || 'Direct Message');
+    const count = parseInt(unread[c.id] || '0');
+    li.innerHTML = escapeHtml(icon + ' ' + (c.name || 'Direct Message')) + (count > 0 ? '<span class="unread-badge">' + count + '</span>' : '');
     li.onclick = () => selectChannel(c);
     if (c.id === channelId) li.className = 'active';
+    else if (count > 0) li.className = 'has-unread';
     list.appendChild(li);
   });
 }
@@ -339,6 +344,7 @@ function selectChannel(ch) {
   document.getElementById('activeChannelName').textContent = prefix + displayName;
   document.getElementById('activeChannelMeta').textContent = ch.type + ' | ' + (ch.memberCount || 0) + ' members | ID: ' + ch.id.substring(0,8) + '...';
   document.getElementById('msgInput').placeholder = 'Message ' + displayName + '...';
+  api('POST', '/api/v1/channels/' + ch.id + '/read', { lastReadMessageId: null });
   listChannels();
   loadHistory();
 }
