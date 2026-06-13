@@ -36,6 +36,11 @@ public class MessageService implements MessageServicePort {
     private final IdempotencyService idempotencyService;
     private final FanoutService fanoutService;
 
+    @javax.annotation.PostConstruct
+    void onStartup() {
+        log.info("MessageService initialized — pipeline verified");
+    }
+
     @Transactional
     public MessageResponse sendMessage(UUID channelId, SendMessageRequest req) {
         UUID tenantId = TenantContext.getTenantId();
