@@ -30,6 +30,7 @@ public class MinioStorageService implements ObjectStorageService {
 
     private final StorageConfig config;
     private S3Presigner presigner;
+    private S3Presigner publicPresigner;
     private S3Client s3Client;
 
     public MinioStorageService(StorageConfig config) {
@@ -49,6 +50,17 @@ public class MinioStorageService implements ObjectStorageService {
                         .build())
                 .build();
 
+        // Public presigner for browser-accessible URLs
+        String publicEndpoint = config.getPublicEndpoint() != null ? config.getPublicEndpoint() : config.getEndpoint();
+        this.publicPresigner = S3Presigner.builder()
+                .region(Region.of(config.getRegion()))
+                .endpointOverride(URI.create(publicEndpoint))
+                .credentialsProvider(StaticCredentialsProvider.create(creds))
+                .serviceConfiguration(software.amazon.awssdk.services.s3.S3Configuration.builder()
+                        .pathStyleAccessEnabled(true)
+                        .build())
+                .build();
+
         this.s3Client = S3Client.builder()
                 .region(Region.of(config.getRegion()))
                 .endpointOverride(URI.create(config.getEndpoint()))
@@ -56,12 +68,13 @@ public class MinioStorageService implements ObjectStorageService {
                 .serviceConfiguration(s -> s.pathStyleAccessEnabled(true))
                 .build();
 
-        log.info("MinIO/S3 storage initialized: endpoint={} bucket={}", config.getEndpoint(), config.getBucket());
+        log.info("MinIO/S3 storage initialized: endpoint={} publicEndpoint={} bucket={}", config.getEndpoint(), publicEndpoint, config.getBucket());
     }
 
     @PreDestroy
     public void cleanup() {
         if (presigner != null) presigner.close();
+        if (publicPresigner != null) publicPresigner.close();
         if (s3Client != null) s3Client.close();
         log.info("MinIO/S3 clients closed");
     }
@@ -79,7 +92,7 @@ public class MinioStorageService implements ObjectStorageService {
                 .putObjectRequest(putReq)
                 .build();
 
-        return presigner.presignPutObject(presignReq).url().toString();
+        return publicPresigner.presignPutObject(presignReq).url().toString();
     }
 
     @Override
@@ -94,7 +107,7 @@ public class MinioStorageService implements ObjectStorageService {
                 .getObjectRequest(getReq)
                 .build();
 
-        return presigner.presignGetObject(presignReq).url().toString();
+        return publicPresigner.presignGetObject(presignReq).url().toString();
     }
 
     @Override

@@ -164,7 +164,7 @@ function getInitial(n){return(n||'?')[0].toUpperCase();}
 function showPanel(id){document.getElementById(id).classList.add('show');}
 function hidePanel(id){document.getElementById(id).classList.remove('show');}
 function escapeHtml(t){const d=document.createElement('div');d.textContent=t||'';return d.innerHTML;}
-function fixMediaUrl(url){if(!url)return url;return url.replace('http://minio:9000','http://localhost:9000').replace('https://minio:9000','https://localhost:9000');}
+function fixMediaUrl(url){return url;}
 function toast(msg,isError){const t=document.createElement('div');t.style.cssText='position:fixed;top:16px;right:16px;padding:10px 20px;border-radius:6px;font-size:13px;z-index:200;animation:fadeIn 0.3s;max-width:400px;';t.style.background=isError?'#5c1a1a':'#1a3a2a';t.style.color=isError?'#e01e5a':'#2bac76';t.style.border='1px solid '+(isError?'#e01e5a33':'#2bac7633');t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),3000);}
 function logMsg(msg){const el=document.getElementById('logPanel');el.innerHTML+='<div>'+new Date().toLocaleTimeString()+' '+msg.replace(/</g,'&lt;')+'</div>';el.scrollTop=el.scrollHeight;}
 function setStatus(c){const el=document.getElementById('wsStatus');el.className=c?'connected':'disconnected';el.textContent=c?'Connected':'Disconnected';}

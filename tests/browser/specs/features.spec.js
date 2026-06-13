@@ -109,23 +109,24 @@ test.describe('Search', () => {
 });
 
 test.describe('Media Upload', () => {
-  test('Upload URL is reachable from browser (not Docker-internal hostname)', async ({ browser }) => {
+  test('Upload URL uses localhost, not Docker-internal hostname', async ({ browser }) => {
     const slug = 'media-' + Date.now();
     const admin = await registerTenant(slug);
     const channelId = await createChannel(admin.token, 'general');
 
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    await loginViaUI(page, slug, `admin@${slug}.com`);
-    await selectChannel(page, 'general');
-
-    // Verify fixMediaUrl exists and works in the page context
-    const fixed = await page.evaluate(() => {
-      return typeof fixMediaUrl === 'function' && fixMediaUrl('http://minio:9000/bucket/file.png') === 'http://localhost:9000/bucket/file.png';
+    // Get upload URL via API and verify it uses localhost not minio
+    const res = await fetch(`${MSG_BASE.replace(':8083', ':8084')}/api/v1/media/upload-url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${admin.token}` },
+      body: JSON.stringify({ fileName: 'test.txt', contentType: 'text/plain', sizeBytes: 10 })
     });
-    expect(fixed).toBe(true);
+    const data = await res.json();
 
-    await context.close();
+    expect(data.success).toBe(true);
+    expect(data.data.uploadUrl).toContain('localhost:9000');
+    expect(data.data.uploadUrl).not.toContain('minio:9000');
+    expect(data.data.readUrl).toContain('localhost:9000');
+    expect(data.data.readUrl).not.toContain('minio:9000');
   });
 });
 
