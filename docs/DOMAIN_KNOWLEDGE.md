@@ -586,8 +586,34 @@ If Harinder requests a feature NOT documented above, the agent MUST NOT guess or
 ### Step 1: Define What It Is
 - What does this feature do in Slack? (Claude has knowledge of Slack's behavior)
 - Is it user-facing or system-internal?
-- Which service owns it? (auth, channel, message, media, ws-gateway)
 - Is it real-time (needs WS event) or REST-only?
+- **Which service owns it?** Use this decision tree:
+
+**Service ownership decision:**
+| If the feature is about... | It belongs in... |
+|---------------------------|-----------------|
+| Users, authentication, profiles, login | auth-service (:8081) |
+| Channels, DMs, membership, channel settings | channel-service (:8082) |
+| Messages, threads, reactions, pins, search, unread | message-service (:8083) |
+| File/media upload, storage | media-service (:8084) |
+| Real-time delivery, typing, presence | ws-gateway (:8085) |
+| Routing, static UI | api-gateway (:8080) |
+
+**Does it need a NEW service?** Almost never. Create a new service ONLY if ALL of these are true:
+1. The feature has a completely separate domain that doesn't overlap with any existing service (e.g., "notification-service" for push notifications via FCM/APNs, "analytics-service" for usage metrics)
+2. It has its own data store or external integration that no existing service touches
+3. It needs to scale independently from existing services
+4. It does NOT primarily operate on messages, channels, users, or media
+
+**If creating a new service:**
+- Copy the structure of an existing service (e.g., media-service — it's the simplest)
+- Add module to parent `pom.xml`
+- Add to `docker-compose.yml` with health check and service dependencies
+- Add routing in `api-gateway/ServiceRoutes.java`
+- Add to health check scripts and E2E test setup
+- Copy ALL migration files to the new service (Flyway shared DB)
+
+**Default: add to an existing service.** In 90%+ of cases, the feature fits into message-service (anything message-related), channel-service (anything channel-related), or auth-service (anything user-related). Don't over-engineer with a new service unless the domain is truly separate.
 
 ### Step 2: Define the Data Model
 Ask these questions:
