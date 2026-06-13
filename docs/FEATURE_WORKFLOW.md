@@ -508,6 +508,15 @@ test.describe('Feature Name', () => {
 
 **Run:** `./test-browser.sh` (uses Docker, no Node.js install needed)
 
+**Also update `tests/browser/specs/demo-flow.spec.js`** — this is the full end-to-end demo simulation test. When adding a new feature, add its verification steps to the demo flow test so that the complete user journey is tested. This test catches integration bugs that individual feature tests miss (e.g., media URLs unreachable, stale unread badges, missing display names).
+
+**Browser tests must verify the REAL user experience, not just "did the API work":**
+- Does the UI show human-readable text, not UUIDs?
+- Do URLs work from the browser (not Docker-internal hostnames)?
+- Do counts/badges show correct values (not stale, not doubled)?
+- Do real-time updates show the other user's NAME, not their ID?
+- Does the active channel behave correctly (no unread badge, typing shows)?
+
 ### Step 13: Update HTML Demo Client (if UI-visible feature)
 
 **File:** `api-gateway/src/main/resources/static/index.html`

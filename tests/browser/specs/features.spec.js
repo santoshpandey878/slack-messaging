@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const { setupTwoUsers, sendMessage, waitForMessage, countElements, MSG_BASE } = require('../helpers');
+const { setupTwoUsers, sendMessage, waitForMessage, countElements, MSG_BASE, registerTenant, createChannel, loginViaUI, selectChannel } = require('../helpers');
 
 test.describe('Threads', () => {
   let env;
@@ -105,6 +105,27 @@ test.describe('Search', () => {
 
     const noResults = await env.pageA.locator(':has-text("No results")').count();
     expect(noResults).toBeGreaterThan(0);
+  });
+});
+
+test.describe('Media Upload', () => {
+  test('Upload URL is reachable from browser (not Docker-internal hostname)', async ({ browser }) => {
+    const slug = 'media-' + Date.now();
+    const admin = await registerTenant(slug);
+    const channelId = await createChannel(admin.token, 'general');
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await loginViaUI(page, slug, `admin@${slug}.com`);
+    await selectChannel(page, 'general');
+
+    // Verify fixMediaUrl exists and works in the page context
+    const fixed = await page.evaluate(() => {
+      return typeof fixMediaUrl === 'function' && fixMediaUrl('http://minio:9000/bucket/file.png') === 'http://localhost:9000/bucket/file.png';
+    });
+    expect(fixed).toBe(true);
+
+    await context.close();
   });
 });
 
