@@ -328,10 +328,11 @@ async function listChannels() {
   r.data.forEach(c => {
     const li = document.createElement('li');
     const icon = c.type === 'DM' ? '\uD83D\uDCAC' : c.type === 'PRIVATE' ? '\uD83D\uDD12' : '#';
-    const count = parseInt(unread[c.id] || '0');
+    const isActive = c.id === channelId;
+    const count = isActive ? 0 : parseInt(unread[c.id] || '0');
     li.innerHTML = escapeHtml(icon + ' ' + (c.name || 'Direct Message')) + (count > 0 ? '<span class="unread-badge">' + count + '</span>' : '');
     li.onclick = () => selectChannel(c);
-    if (c.id === channelId) li.className = 'active';
+    if (isActive) li.className = 'active';
     else if (count > 0) li.className = 'has-unread';
     list.appendChild(li);
   });

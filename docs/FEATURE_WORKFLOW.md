@@ -467,16 +467,17 @@ REACTION=$(curl -s -X POST "http://localhost:8083/api/v1/channels/$CH_ID/message
 check "$REACTION" "Add reaction"
 ```
 
-### Step 12b: Browser Test (MANDATORY for UI-visible features)
+### Step 12b: Write Browser Tests (MANDATORY for UI-visible features — DO NOT SKIP)
 
 **File:** Add test spec to `tests/browser/specs/{feature}.spec.js`
 
-Browser tests run real Chromium via Playwright in Docker. They catch WS/UI bugs that curl tests cannot.
+Browser tests run real Chromium via Playwright in Docker. They catch WS/UI bugs that curl tests cannot. **You MUST write browser tests for every feature that touches the frontend.** This is not optional — skipping this step has caused production bugs.
 
-**When to add browser tests:**
+**You MUST add browser tests when:**
 - Feature has frontend UI changes
 - Feature uses WebSocket events
 - Feature involves multi-user interaction (reactions, threads, typing, presence)
+- Feature displays counts, badges, or state that could double-count
 
 **Test pattern:**
 ```javascript
