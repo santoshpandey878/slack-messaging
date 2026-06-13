@@ -450,6 +450,9 @@ function appendMessage(sender, content, time, mediaUrl, messageType) {
   el.scrollTop = el.scrollHeight;
 }
 
+// Auto-refresh channel list every 15s (picks up new channels, DMs, membership changes)
+setInterval(() => { if (token) listChannels(); }, 15000);
+
 // Auto-show auth panel on load
 window.onload = () => showPanel('authPanel');
 </script>
