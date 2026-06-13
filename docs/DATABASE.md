@@ -141,6 +141,39 @@
 
 **Constraints:** UNIQUE(user_id, item_type, item_id)
 
+### scheduled_messages (future — schema ready, not yet migrated)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | UUID PK | |
+| tenant_id | UUID NOT NULL | |
+| channel_id | UUID NOT NULL | |
+| user_id | UUID NOT NULL | Sender |
+| content | TEXT | |
+| media_url | TEXT | |
+| media_type | VARCHAR(100) | |
+| scheduled_at | TIMESTAMPTZ NOT NULL | When to send |
+| status | VARCHAR(20) DEFAULT 'PENDING' | PENDING, SENT, CANCELLED, FAILED |
+| created_at | TIMESTAMPTZ | |
+
+**Indexes:** idx_scheduled_status_time(status, scheduled_at)
+**Implementation:** `@Scheduled(fixedDelay = 30000)` polls for `WHERE status = 'PENDING' AND scheduled_at <= NOW()`. Use `SELECT ... FOR UPDATE SKIP LOCKED` for multi-instance safety.
+
+### webhooks (future — schema ready, not yet migrated)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | UUID PK | |
+| tenant_id | UUID NOT NULL | |
+| channel_id | UUID NOT NULL | |
+| name | VARCHAR(255) NOT NULL | Display name |
+| avatar_url | VARCHAR(2048) | Custom icon |
+| token | VARCHAR(255) NOT NULL UNIQUE | URL secret (UUID v4) |
+| created_by | UUID NOT NULL | |
+| is_active | BOOLEAN DEFAULT TRUE | |
+| created_at | TIMESTAMPTZ | |
+
+**Indexes:** idx_webhooks_token(token), idx_webhooks_channel(channel_id)
+**Endpoint:** `POST /webhooks/{token}` — public (no JWT), token is the secret. Add to `JwtAuthFilter` public paths.
+
 ## How to Add a New Migration
 
 1. Find the latest version: `ls auth-service/src/main/resources/db/migration/`

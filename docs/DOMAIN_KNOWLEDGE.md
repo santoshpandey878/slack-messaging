@@ -177,6 +177,7 @@ Shows "User X is typing..." in real-time when someone is composing a message.
 
 ### WS Events
 - `typing.start` — fan out to channel members, no unread tracking
+- `typing.stop` — **NOT used.** The `WsEventType.TYPING_STOP` enum value and `WsPayloadBuilder.buildTypingStop()` exist in the codebase for future use, but the current implementation relies on client-side auto-expiry (5-second timeout). Do NOT fan out `typing.stop` events — the client handles it.
 
 ---
 

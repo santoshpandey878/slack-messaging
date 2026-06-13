@@ -14,7 +14,7 @@ Configured in `JwtAuthFilter.java`:
 - `/api/v1/auth/login`
 - `/health`
 - `/actuator/*`
-- `/internal/*` (inter-service)
+- `/internal/*` (inter-service — **Docker-network only, see note below**)
 - `/ws` (WebSocket — auth via query param token)
 - `/swagger-ui/*`, `/v3/api-docs`
 
@@ -34,6 +34,14 @@ Token passed as query parameter: `ws://host/ws?token=<JWT>`. Validated in `WsHan
 - **admin** — can create users, manage channels, remove members
 - **member** — can create channels, send messages, manage own membership
 - Checked via `TenantContext.getUserRole()` or `AuthorizationService`
+
+### Internal Endpoints (`/internal/*`) — Network Isolation
+- Internal endpoints have **zero authentication** — no JWT validation
+- They are ONLY accessible within the Docker network (service-to-service)
+- The API Gateway (`ServiceRoutes.java`) does NOT route `/internal/*` paths — they are unreachable from outside
+- **NEVER add `/internal/*` paths to `ServiceRoutes`** — this would expose them publicly
+- **NEVER add business logic that relies on user identity** to internal endpoints — there is no `TenantContext` set
+- If you need to pass tenant/user context, use query parameters (e.g., `?tenantId=...`)
 
 ### Channel Authorization
 - `AuthorizationService.requireMembership(channelId)` — must be channel member

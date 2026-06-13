@@ -56,10 +56,23 @@
 
 | Method | Path | Body | Response | Notes |
 |--------|------|------|----------|-------|
-| POST | `/api/v1/channels/{id}/messages` | SendMessageRequest | MessageResponse | Idempotent |
-| GET | `/api/v1/channels/{id}/messages` | ?before&limit | List\<MessageResponse\> | Cursor pagination |
+| POST | `/api/v1/channels/{id}/messages` | SendMessageRequest | MessageResponse | Idempotent. Include `parentMessageId` for thread replies |
+| GET | `/api/v1/channels/{id}/messages` | ?before&limit | List\<MessageResponse\> | Cursor pagination. Excludes thread replies (top-level only) |
+| GET | `/api/v1/channels/{id}/threads/{messageId}` | ?limit | List\<MessageResponse\> | Thread replies (oldest first, ASC) |
+| POST | `/api/v1/channels/{id}/messages/{msgId}/reactions` | AddReactionRequest | ReactionResponse | 409 if duplicate |
+| DELETE | `/api/v1/channels/{id}/messages/{msgId}/reactions/{emoji}` | — | — | Remove own reaction |
+| GET | `/api/v1/channels/{id}/messages/{msgId}/reactions` | — | List\<ReactionResponse\> | All reactions on a message |
+| POST | `/api/v1/channels/{id}/pins/{messageId}` | — | — | Pin a message (max 100) |
+| DELETE | `/api/v1/channels/{id}/pins/{messageId}` | — | — | Unpin |
+| GET | `/api/v1/channels/{id}/pins` | — | List\<PinnedMessage\> | List pinned messages |
+| POST | `/api/v1/stars` | StarRequest | — | Star a message/channel/file |
+| DELETE | `/api/v1/stars/{itemType}/{itemId}` | — | — | Unstar |
+| GET | `/api/v1/stars` | — | List\<StarredItem\> | Current user's stars |
+| GET | `/api/v1/search` | ?q&channelId&limit&before | List\<MessageResponse\> | Search messages |
 | POST | `/api/v1/channels/{id}/read` | MarkReadRequest | — | Mark read |
 | GET | `/api/v1/unread` | — | Map\<channelId, count\> | |
+
+**Note:** Threads, reactions, pins, stars, and search endpoints are defined in DOMAIN_KNOWLEDGE.md and ready to implement. Some may not be live yet — check current feature status in README.md.
 
 **Internal (no auth):**
 | Method | Path | Response |
@@ -115,9 +128,11 @@ Always include:
 
 Routes are matched by path prefix:
 - `/api/v1/auth/*`, `/api/v1/users` → auth-service
-- `/api/v1/channels/*`, `/api/v1/dm` → channel-service (except messages/read/unread)
-- `/api/v1/channels/*/messages*`, `/api/v1/channels/*/read`, `/api/v1/unread` → message-service
+- `/api/v1/channels/*`, `/api/v1/dm` → channel-service (except below)
+- `/api/v1/channels/*/messages*`, `/api/v1/channels/*/threads*`, `/api/v1/channels/*/read`, `/api/v1/unread` → message-service
 - `/api/v1/media/*` → media-service
 - `/ws` → ws-gateway
+
+**IMPORTANT:** When adding new sub-resource paths under `/api/v1/channels/{id}/` (e.g., `/pins`, `/stars`), you MUST add a routing rule in `ServiceRoutes.resolveServiceUrl()` or the request will default to channel-service instead of message-service.
 
 To add a new route for a completely new path prefix, update `ServiceRoutes.resolveUrl()`.

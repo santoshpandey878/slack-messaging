@@ -33,6 +33,23 @@ fi
 JAVA_HOME=$(/usr/libexec/java_home -v 11) mvn test
 ```
 
+### Browser Tests (Playwright in Docker)
+```bash
+# Multi-user browser tests — no Node.js install needed, runs in Docker
+./test-browser.sh
+```
+
+Tests real Chromium browser with two user contexts (like two incognito windows). Catches bugs that curl/E2E tests fundamentally cannot:
+- **WS sender echo** — optimistic UI update + WS event = double-count for the acting user
+- **Cross-user WS delivery** — messages/reactions/threads appearing in other users' tabs
+- **DOM rendering** — badge counts, thread indicators, reaction displays
+
+**Location:** `tests/browser/specs/*.spec.js`
+**Infrastructure:** `tests/browser/Dockerfile` (Playwright official image with Chromium pre-installed)
+**Helpers:** `tests/browser/helpers.js` (setupTwoUsers, loginViaUI, sendMessage, etc.)
+
+**When to add browser tests:** Every feature with frontend UI changes, WebSocket events, or multi-user interaction MUST have browser tests. See FEATURE_WORKFLOW.md Step 12b.
+
 ### Integration Tests (requires Docker)
 ```bash
 RUN_INTEGRATION_TESTS=true JAVA_HOME=$(/usr/libexec/java_home -v 11) mvn test

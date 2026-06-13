@@ -213,6 +213,36 @@ document.getElementById('msgInput').addEventListener('input', () => {
 --radius: 6px            /* border radius */
 ```
 
+## Existing UI Patterns (reference when extending)
+
+### DM Channel Name Display
+DM channels have `name: null`. The sidebar shows "Direct Message" as fallback:
+```javascript
+const displayName = c.name || 'Direct Message';
+```
+For a better experience, resolve the other user's display name from `userNames` map.
+
+### Channel-Switch State Reset
+When switching channels via `selectChannel(ch)`:
+1. Set `channelId` to new channel
+2. Close any open thread panel (`closeThread()`)
+3. Mark the channel as read (`POST /read`)
+4. Refresh the channel list (updates active state + unread badges)
+5. Load message history for the new channel
+
+### Media Message Rendering
+`appendMessage()` checks `mediaUrl` and renders accordingly:
+- Image files (png/jpg/gif/webp) → `<img>` tag with click-to-open and error fallback
+- Other files → download link with paperclip icon
+- Always `escapeHtml()` on URLs before inserting into `src` or `href`
+
+### Unread Badge Display
+`listChannels()` fetches both channels and unread counts in parallel:
+- Red badge with count shown next to channel name
+- Active channel never shows a badge (you're looking at it)
+- Bold text on channels with unread messages
+- Badge clears when channel is selected (mark-read fires)
+
 ## Security Rules
 - **Always use `escapeHtml()`** before inserting user content into DOM
 - **Never use `innerHTML` with user data** — use `textContent` or `escapeHtml()`

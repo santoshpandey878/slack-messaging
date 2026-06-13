@@ -48,6 +48,35 @@ When Harinder asks for NFR improvements (performance, monitoring, rate limiting,
 - MDC structured logging: `tenantId`, `userId` on every request
 - Activity log in HTML demo client
 
+### If Asked: "Add distributed tracing"
+
+**Current:** MDC structured logging with `tenantId` and `userId` on every request. Cross-service calls are traceable via log correlation, but no automated span propagation.
+
+**Scale path (OpenTelemetry + Jaeger):**
+1. Add `opentelemetry-javaagent` as a JVM argument in each Dockerfile:
+   ```dockerfile
+   ENTRYPOINT ["java", "-javaagent:/app/opentelemetry-javaagent.jar", "-jar", "app.jar"]
+   ```
+2. Configure exporter in `application.yml`:
+   ```yaml
+   otel:
+     exporter:
+       otlp:
+         endpoint: http://jaeger:4317
+     service:
+       name: ${spring.application.name}
+   ```
+3. Add Jaeger to `docker-compose.yml`:
+   ```yaml
+   jaeger:
+     image: jaegertracing/all-in-one:latest
+     ports: ["16686:16686", "4317:4317"]
+   ```
+4. Traces auto-propagate across REST calls (RestTemplate) and Redis operations
+5. View at `http://localhost:16686` — full request waterfall across all 6 services
+
+**Why not implemented now:** Adds infra complexity. MDC logging is sufficient for debugging. Tracing is a "when you need it" addition, not a blocker.
+
 ### If Asked: "Add monitoring / metrics"
 
 **Endpoint-level metrics (Micrometer — already included via Actuator):**
