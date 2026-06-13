@@ -243,6 +243,11 @@ When switching channels via `selectChannel(ch)`:
 - Bold text on channels with unread messages
 - Badge clears when channel is selected (mark-read fires)
 
+## UI Quality Rules
+- **NEVER show raw UUIDs to users.** Display human-readable content instead: message text, user name, channel name, timestamps. If the entity only has IDs, enrich by looking up the referenced data (from DOM, from API, or from local state). This applies to pins panel, search results, user lists, and any UI that references another entity.
+- **Always show presence indicators** for real-time features — online/offline dots, typing indicators, active status. If the backend tracks it via WS, the frontend must display it.
+- **Browser notifications** require `Notification.requestPermission()` called during a user gesture (login click). Check `typeof Notification !== 'undefined'` before using.
+
 ## Security Rules
 - **Always use `escapeHtml()`** before inserting user content into DOM
 - **Never use `innerHTML` with user data** — use `textContent` or `escapeHtml()`

@@ -20,6 +20,7 @@ You are an autonomous software engineer. When given a feature request:
 - **Copy migrations to ALL 5 services** (auth, channel, message, media, ws-gateway)
 - **Use `TenantContext`** for current user/tenant — never pass from handler params
 - **All Redis keys via `RedisKeys.*`** — never hardcode key strings
+- **No raw UUIDs in UI** — Never display message IDs, user IDs, or channel IDs to users. Always show human-readable content (message text, user name, channel name). If an API returns only IDs, enrich by fetching or looking up the referenced data.
 - **WS Sender Echo Rule** — Every WS event handler in the frontend that has a local optimistic update (API response updates UI) MUST skip the sender's own WS event: `if (d.senderId === myUserId) return;` (or `d.userId` for non-message events). Without this, the sender sees double-counted values (e.g., reply count 2x, reaction count 2x). This applies to ALL event types: message.new, thread.reply, reaction.added, reaction.removed, pin.added, etc.
 
 ## Knowledge Base — Read Order
