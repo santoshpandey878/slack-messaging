@@ -22,4 +22,9 @@ public interface ChannelServicePort {
     List<ChannelMember> getMembers(UUID channelId);
 
     List<UUID> getMemberUserIds(UUID channelId);
+
+    /**
+     * Get all channel IDs that a user belongs to (for cross-channel search).
+     */
+    List<UUID> getUserChannelIds(UUID tenantId, UUID userId);
 }

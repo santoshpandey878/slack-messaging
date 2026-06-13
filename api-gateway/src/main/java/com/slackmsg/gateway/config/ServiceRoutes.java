@@ -29,10 +29,16 @@ public class ServiceRoutes {
         if (path.startsWith("/api/v1/auth/") || path.startsWith("/api/v1/users")) {
             return authUrl;
         }
+        if (path.startsWith("/api/v1/search")) {
+            return messageUrl;
+        }
         if (path.startsWith("/api/v1/channels") || path.startsWith("/api/v1/dm")) {
             // Channel-level endpoints go to channel-service
-            // BUT /channels/{id}/messages goes to message-service
+            // BUT /channels/{id}/messages, threads, pins, reactions go to message-service
             if (path.matches("/api/v1/channels/[^/]+/messages.*")
+                || path.matches("/api/v1/channels/[^/]+/threads.*")
+                || path.matches("/api/v1/channels/[^/]+/pins.*")
+                || path.matches("/api/v1/channels/[^/]+/search.*")
                 || path.matches("/api/v1/channels/[^/]+/read")
                 || path.startsWith("/api/v1/unread")) {
                 return messageUrl;

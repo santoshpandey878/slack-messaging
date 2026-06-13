@@ -62,4 +62,21 @@ public class ChannelServiceClient extends ServiceClient implements ChannelServic
             return Collections.emptyList(); // Fan-out best-effort — empty = no delivery
         }
     }
+
+    @Override
+    public List<UUID> getUserChannelIds(UUID tenantId, UUID userId) {
+        try {
+            Map response = get("/internal/channels/user/" + userId + "/channel-ids?tenantId=" + tenantId, Map.class);
+            if (response != null && response.containsKey("data")) {
+                List<String> ids = (List<String>) response.get("data");
+                List<UUID> result = new ArrayList<>();
+                for (String id : ids) result.add(UUID.fromString(id));
+                return result;
+            }
+            return Collections.emptyList();
+        } catch (Exception e) {
+            log.error("Channel-service unavailable for user channel IDs: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
 }

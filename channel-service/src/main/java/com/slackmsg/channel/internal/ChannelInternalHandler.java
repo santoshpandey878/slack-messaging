@@ -35,4 +35,11 @@ public class ChannelInternalHandler {
         List<UUID> ids = channelService.getMemberUserIds(channelId);
         return ResponseEntity.ok(ApiResponse.ok(ids));
     }
+
+    @GetMapping("/user/{userId}/channel-ids")
+    public ResponseEntity<ApiResponse<List<UUID>>> getUserChannelIds(
+            @PathVariable UUID userId, @RequestParam UUID tenantId) {
+        List<UUID> ids = channelService.getUserChannelIds(tenantId, userId);
+        return ResponseEntity.ok(ApiResponse.ok(ids));
+    }
 }

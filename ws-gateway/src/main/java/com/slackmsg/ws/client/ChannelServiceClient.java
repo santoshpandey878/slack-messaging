@@ -61,4 +61,9 @@ public class ChannelServiceClient extends ServiceClient implements ChannelServic
             return Collections.emptyList();
         }
     }
+
+    @Override
+    public List<UUID> getUserChannelIds(UUID tenantId, UUID userId) {
+        throw new UnsupportedOperationException("Not needed in ws-gateway");
+    }
 }

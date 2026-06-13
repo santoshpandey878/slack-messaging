@@ -111,4 +111,11 @@ public class ChannelService implements ChannelServicePort {
                 .map(ChannelMember::getUserId)
                 .collect(Collectors.toList());
     }
+
+    @Override
+    public List<UUID> getUserChannelIds(UUID tenantId, UUID userId) {
+        return channelStore.findUserChannels(tenantId, userId).stream()
+                .map(Channel::getId)
+                .collect(Collectors.toList());
+    }
 }

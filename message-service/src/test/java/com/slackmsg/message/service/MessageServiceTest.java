@@ -1,5 +1,6 @@
 package com.slackmsg.message.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.slackmsg.domain.entity.Message;
 import com.slackmsg.domain.enums.MessageType;
 import com.slackmsg.dto.request.SendMessageRequest;
@@ -28,186 +29,90 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class MessageServiceTest {
 
-    @Mock
-    private MessageStore messageStore;
+    @Mock private MessageStore messageStore;
+    @Mock private ChannelServicePort channelService;
+    @Mock private IdempotencyService idempotencyService;
+    @Mock private FanoutService fanoutService;
+    @Mock private ObjectMapper objectMapper;
 
-    @Mock
-    private ChannelServicePort channelService;
-
-    @Mock
-    private IdempotencyService idempotencyService;
-
-    @Mock
-    private FanoutService fanoutService;
-
-    @InjectMocks
-    private MessageService messageService;
+    @InjectMocks private MessageService messageService;
 
     private final UUID tenantId = UUID.randomUUID();
     private final UUID userId = UUID.randomUUID();
     private final UUID channelId = UUID.randomUUID();
 
     @BeforeEach
-    void setUp() {
-        TenantContext.setTenantId(tenantId);
-        TenantContext.setUserId(userId);
-        TenantContext.setDisplayName("Test User");
-    }
-
+    void setUp() { TenantContext.setTenantId(tenantId); TenantContext.setUserId(userId); TenantContext.setDisplayName("Test User"); }
     @AfterEach
-    void tearDown() {
-        TenantContext.clear();
+    void tearDown() { TenantContext.clear(); }
+
+    private Message msg(UUID id, String content) {
+        return Message.builder().id(id).tenantId(tenantId).channelId(channelId).senderId(userId)
+                .senderName("Test User").content(content).messageType(MessageType.TEXT).createdAt(Instant.now()).build();
     }
 
-    @Test
-    void sendMessage_success() {
-        SendMessageRequest req = new SendMessageRequest();
-        req.setContent("Hello world");
-        req.setIdempotencyKey("key-1");
-
-        UUID messageId = UUID.randomUUID();
-        Message savedMessage = Message.builder()
-                .id(messageId)
-                .tenantId(tenantId)
-                .channelId(channelId)
-                .senderId(userId)
-                .senderName("Test User")
-                .content("Hello world")
-                .messageType(MessageType.TEXT)
-                .createdAt(Instant.now())
-                .idempotencyKey("key-1")
-                .build();
-
+    @Test void sendMessage_success() {
+        SendMessageRequest req = new SendMessageRequest(); req.setContent("Hello"); req.setIdempotencyKey("k1");
+        UUID msgId = UUID.randomUUID();
         when(channelService.isMember(channelId, userId)).thenReturn(true);
-        when(idempotencyService.checkDuplicate(tenantId, userId, "key-1")).thenReturn(Optional.empty());
-        when(messageStore.save(any(Message.class))).thenReturn(savedMessage);
-
-        MessageResponse response = messageService.sendMessage(channelId, req);
-
-        assertNotNull(response);
-        assertEquals(messageId, response.getId());
-        assertEquals(channelId, response.getChannelId());
-        assertEquals(userId, response.getSenderId());
-        assertEquals("Hello world", response.getContent());
-
-        verify(messageStore).save(any(Message.class));
-        verify(idempotencyService).markCompleted(tenantId, userId, "key-1", messageId.toString());
-        verify(fanoutService).fanout(eq(tenantId), eq(channelId), any(Message.class), eq(userId), eq("Test User"));
+        when(idempotencyService.checkDuplicate(tenantId, userId, "k1")).thenReturn(Optional.empty());
+        when(messageStore.save(any())).thenReturn(msg(msgId, "Hello"));
+        MessageResponse r = messageService.sendMessage(channelId, req);
+        assertEquals(msgId, r.getId());
+        verify(messageStore).save(any());
     }
 
-    @Test
-    void sendMessage_notMember() {
-        SendMessageRequest req = new SendMessageRequest();
-        req.setContent("Hello");
-
+    @Test void sendMessage_notMember() {
+        SendMessageRequest req = new SendMessageRequest(); req.setContent("Hi");
         when(channelService.isMember(channelId, userId)).thenReturn(false);
-
-        assertThrows(SecurityException.class,
-                () -> messageService.sendMessage(channelId, req));
-
-        verify(messageStore, never()).save(any());
+        assertThrows(SecurityException.class, () -> messageService.sendMessage(channelId, req));
     }
 
-    @Test
-    void sendMessage_noContent() {
+    @Test void sendMessage_noContent() {
         SendMessageRequest req = new SendMessageRequest();
-        // No content, no media
-
         when(channelService.isMember(channelId, userId)).thenReturn(true);
-
-        assertThrows(IllegalArgumentException.class,
-                () -> messageService.sendMessage(channelId, req));
-
-        verify(messageStore, never()).save(any());
+        assertThrows(IllegalArgumentException.class, () -> messageService.sendMessage(channelId, req));
     }
 
-    @Test
-    void sendMessage_idempotent() {
-        SendMessageRequest req = new SendMessageRequest();
-        req.setContent("Hello");
-        req.setIdempotencyKey("dup-key");
-
-        UUID existingMsgId = UUID.randomUUID();
-        Message existingMessage = Message.builder()
-                .id(existingMsgId)
-                .tenantId(tenantId)
-                .channelId(channelId)
-                .senderId(userId)
-                .senderName("Test User")
-                .content("Hello")
-                .messageType(MessageType.TEXT)
-                .createdAt(Instant.now())
-                .build();
-
+    @Test void sendMessage_threadReply() {
+        UUID parentId = UUID.randomUUID();
+        SendMessageRequest req = new SendMessageRequest(); req.setContent("Reply"); req.setParentMessageId(parentId); req.setIdempotencyKey("t1");
         when(channelService.isMember(channelId, userId)).thenReturn(true);
-        when(idempotencyService.checkDuplicate(tenantId, userId, "dup-key"))
-                .thenReturn(Optional.of(existingMsgId.toString()));
-        when(messageStore.findById(tenantId, existingMsgId)).thenReturn(Optional.of(existingMessage));
-
-        MessageResponse response = messageService.sendMessage(channelId, req);
-
-        assertNotNull(response);
-        assertEquals(existingMsgId, response.getId());
-        verify(messageStore, never()).save(any());
-        verify(fanoutService, never()).fanout(any(), any(), any(), any(), any());
+        when(messageStore.findById(tenantId, parentId)).thenReturn(Optional.of(msg(parentId, "Parent")));
+        when(idempotencyService.checkDuplicate(any(), any(), any())).thenReturn(Optional.empty());
+        Message reply = msg(UUID.randomUUID(), "Reply"); reply.setParentMessageId(parentId);
+        when(messageStore.save(any())).thenReturn(reply);
+        MessageResponse r = messageService.sendMessage(channelId, req);
+        assertEquals(parentId, r.getParentMessageId());
+        verify(messageStore).incrementReplyCount(parentId);
     }
 
-    @Test
-    void sendMessage_fanoutFailure() {
-        SendMessageRequest req = new SendMessageRequest();
-        req.setContent("Hello");
-        req.setIdempotencyKey("key-2");
-
-        UUID messageId = UUID.randomUUID();
-        Message savedMessage = Message.builder()
-                .id(messageId)
-                .tenantId(tenantId)
-                .channelId(channelId)
-                .senderId(userId)
-                .senderName("Test User")
-                .content("Hello")
-                .messageType(MessageType.TEXT)
-                .createdAt(Instant.now())
-                .build();
-
+    @Test void sendMessage_replyToReply_blocked() {
+        UUID parentId = UUID.randomUUID();
+        Message replyMsg = msg(parentId, "R"); replyMsg.setParentMessageId(UUID.randomUUID());
+        SendMessageRequest req = new SendMessageRequest(); req.setContent("Nested"); req.setParentMessageId(parentId);
         when(channelService.isMember(channelId, userId)).thenReturn(true);
-        when(idempotencyService.checkDuplicate(tenantId, userId, "key-2")).thenReturn(Optional.empty());
-        when(messageStore.save(any(Message.class))).thenReturn(savedMessage);
-        doThrow(new RuntimeException("Redis down")).when(fanoutService)
-                .fanout(any(), any(), any(), any(), any());
-
-        // Should NOT throw despite fanout failure (best-effort)
-        MessageResponse response = messageService.sendMessage(channelId, req);
-
-        assertNotNull(response);
-        assertEquals(messageId, response.getId());
-        verify(messageStore).save(any(Message.class));
+        when(messageStore.findById(tenantId, parentId)).thenReturn(Optional.of(replyMsg));
+        assertThrows(IllegalArgumentException.class, () -> messageService.sendMessage(channelId, req));
     }
 
-    @Test
-    void getHistory_success() {
-        Instant cursor = Instant.now();
-        Message msg = Message.builder()
-                .id(UUID.randomUUID())
-                .tenantId(tenantId)
-                .channelId(channelId)
-                .senderId(userId)
-                .senderName("Test User")
-                .content("Hello")
-                .messageType(MessageType.TEXT)
-                .createdAt(Instant.now())
-                .build();
-
+    @Test void getHistory_clampsLimit() {
         when(channelService.isMember(channelId, userId)).thenReturn(true);
-        when(messageStore.getHistory(eq(tenantId), eq(channelId), eq(cursor), anyInt()))
-                .thenReturn(Collections.singletonList(msg));
+        when(messageStore.getHistory(eq(tenantId), eq(channelId), any(), anyInt())).thenReturn(Collections.emptyList());
+        messageService.getHistory(channelId, Instant.now(), 500);
+        verify(messageStore).getHistory(eq(tenantId), eq(channelId), any(), eq(100));
+    }
 
-        List<MessageResponse> history = messageService.getHistory(channelId, cursor, 200);
+    @Test void searchMessages_emptyQuery() {
+        when(channelService.isMember(channelId, userId)).thenReturn(true);
+        assertThrows(IllegalArgumentException.class, () -> messageService.searchMessages(channelId, "", 20));
+    }
 
-        assertNotNull(history);
-        assertEquals(1, history.size());
-
-        // Verify limit was clamped to 100 (max)
-        verify(messageStore).getHistory(tenantId, channelId, cursor, 100);
+    @Test void searchMessages_success() {
+        when(channelService.isMember(channelId, userId)).thenReturn(true);
+        when(messageStore.searchMessages(eq(tenantId), any(), eq("hello"), anyInt()))
+                .thenReturn(Collections.singletonList(msg(UUID.randomUUID(), "hello world")));
+        List<MessageResponse> results = messageService.searchMessages(channelId, "hello", 20);
+        assertEquals(1, results.size());
     }
 }

@@ -3,12 +3,15 @@ package com.slackmsg.dto.request;
 import lombok.Data;
 
 import javax.validation.constraints.Size;
+import java.util.UUID;
 
 @Data
 public class SendMessageRequest {
 
     @Size(max = 40960, message = "Message too long (max 40KB)")
     private String content;
+
+    private UUID parentMessageId;
 
     @Size(max = 2048, message = "Media URL too long")
     private String mediaUrl;
