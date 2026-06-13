@@ -125,9 +125,15 @@ public class WsPayloadBuilder {
 
     public static String buildPresenceChange(UUID tenantId, UUID userId, String status,
                                               ObjectMapper objectMapper) {
+        return buildPresenceChange(tenantId, userId, status, null, objectMapper);
+    }
+
+    public static String buildPresenceChange(UUID tenantId, UUID userId, String status,
+                                              String displayName, ObjectMapper objectMapper) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("userId", userId.toString());
         data.put("status", status);
+        if (displayName != null) data.put("displayName", displayName);
         return buildEvent(WsEventType.PRESENCE_CHANGE, tenantId, null, data, objectMapper);
     }
 

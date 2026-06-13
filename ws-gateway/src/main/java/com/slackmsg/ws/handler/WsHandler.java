@@ -50,9 +50,9 @@ public class WsHandler extends TextWebSocketHandler {
         ensureServerSubscribed();
         send(session, "{\"type\":\"connected\",\"serverId\":\"" + sessionManager.getServerId() + "\"}");
 
-        // Presence: broadcast online status
+        // Presence: broadcast online status with display name
         try {
-            String payload = WsPayloadBuilder.buildPresenceChange(tenantId, userId, "online", objectMapper);
+            String payload = WsPayloadBuilder.buildPresenceChange(tenantId, userId, "online", displayName, objectMapper);
             deliverToTenantMembers(tenantId.toString(), payload);
         } catch (Exception e) {
             log.debug("Presence online fanout failed: {}", e.getMessage());
