@@ -22,6 +22,8 @@ You are an autonomous software engineer. When given a feature request:
 - **All Redis keys via `RedisKeys.*`** — never hardcode key strings
 - **No raw UUIDs in UI** — Never display message IDs, user IDs, or channel IDs to users. Always show human-readable content (message text, user name, channel name). If an API returns only IDs, enrich by fetching or looking up the referenced data.
 - **WS Sender Echo Rule** — Every WS event handler in the frontend that has a local optimistic update (API response updates UI) MUST skip the sender's own WS event: `if (d.senderId === myUserId) return;` (or `d.userId` for non-message events). Without this, the sender sees double-counted values (e.g., reply count 2x, reaction count 2x). This applies to ALL event types: message.new, thread.reply, reaction.added, reaction.removed, pin.added, etc.
+- **Backend tracks it → Frontend displays it** — If a WS event is sent for a state change (presence, typing, reactions, pins), the frontend MUST render it visibly. Tracking state in a JS variable without showing it to the user is a bug. Every WS event type must have a visible UI effect.
+- **Browser tests are a BLOCKING GATE** — Write browser tests ALONGSIDE the feature code (Step 12b), not after. Do NOT proceed to build/deploy/commit until browser tests exist for every frontend/WS feature. Browser tests must verify: no raw IDs in UI, no sender double-count, cross-user WS delivery works, real-time state is displayed.
 
 ## Knowledge Base — Read Order
 
@@ -148,7 +150,12 @@ Every feature MUST complete this entire pipeline. Do NOT stop at writing code. D
 
 ```
 PHASE 1 — LOCAL (verify everything works before committing):
-  Code → Unit Tests → Docker Deploy → Health Check → E2E → Browser Tests → Manual Curl Test → Frontend Test → Update README.md (features list + "How to Test" demo steps)
+  Code + Write Browser Tests (together, not after) → Unit Tests → Docker Deploy → Health Check
+  → E2E (test-e2e.sh) → Browser Tests (test-browser.sh — ALL must pass, including new ones)
+  → Manual Curl Test → Frontend Test → Update README.md (features list + "How to Test" demo steps)
+
+  ⚠ Browser tests are a BLOCKING GATE. If you wrote frontend/WS code but no browser tests,
+  STOP and write them before proceeding. Do NOT commit without browser tests passing.
 
 PHASE 2 — GIT + CI/CD (only after Phase 1 passes):
   Commit → Push → CI (GitHub Actions) → Fix if CI fails → CD auto-deploys → Final verify

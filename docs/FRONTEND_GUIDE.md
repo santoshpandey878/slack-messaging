@@ -243,10 +243,27 @@ When switching channels via `selectChannel(ch)`:
 - Bold text on channels with unread messages
 - Badge clears when channel is selected (mark-read fires)
 
-## UI Quality Rules
-- **NEVER show raw UUIDs to users.** Display human-readable content instead: message text, user name, channel name, timestamps. If the entity only has IDs, enrich by looking up the referenced data (from DOM, from API, or from local state). This applies to pins panel, search results, user lists, and any UI that references another entity.
-- **Always show presence indicators** for real-time features — online/offline dots, typing indicators, active status. If the backend tracks it via WS, the frontend must display it.
-- **Browser notifications** require `Notification.requestPermission()` called during a user gesture (login click). Check `typeof Notification !== 'undefined'` before using.
+## UI Quality Rules (MANDATORY — violations cause demo failures)
+
+These rules exist because every one of them was violated and caught during testing. Follow them for EVERY feature.
+
+### No Raw IDs in UI
+- **NEVER show raw UUIDs, entity IDs, or database keys to users.** Display human-readable content instead: message text, user name, channel name, timestamps.
+- If the API returns only IDs (e.g., PinnedMessage has messageId but no content), enrich by looking up the referenced data from DOM, from local state, or via a separate API call.
+- **Applies to:** Pins panel, search results, user lists, member lists, error messages, and ANY UI that references another entity.
+- **Test:** Browser tests must verify no UUID pattern appears in user-visible UI.
+
+### Backend Tracks It → Frontend Must Display It
+- If the backend sends a WS event for a state change, the frontend MUST show it visibly to the user. Tracking state in a JS variable without rendering is a bug.
+- **Presence:** Online/offline status must show toasts or dots — not just update a hidden Set.
+- **Typing:** Must show "X is typing..." indicator — not just log to console.
+- **Reactions:** Must show emoji badges — not just store counts.
+- **Unread:** Must show badge on channel — not just increment a counter.
+
+### Browser API Guards
+- **Notifications:** Require `Notification.requestPermission()` called during a user gesture (login click). Always check `typeof Notification !== 'undefined'` before using — Playwright/headless browsers may not support it.
+- **Clipboard:** Guard with `navigator.clipboard` check.
+- **Any browser API** that may not exist in all environments: guard with typeof check.
 
 ## Security Rules
 - **Always use `escapeHtml()`** before inserting user content into DOM
@@ -281,13 +298,17 @@ if (d.userId === myUserId) return;
 
 This is NOT optional. `message.new` already does this. Every new event type (thread.reply, reaction.added, reaction.removed, pin.added, pin.removed, etc.) MUST follow the same pattern. If your feature has BOTH an `api()` call that updates the UI AND a WS event handler for the same action, you MUST add this guard. No exceptions.
 
-## Feature UI Checklist
+## Feature UI Checklist (COMPLETE ALL before moving to build/test)
 When adding UI for a new feature:
 - [ ] API function added (using `api()` helper)
 - [ ] WS event handler added (in `ws.onmessage`)
 - [ ] **Sender echo guard** — WS handler skips sender's own events (`senderId/userId === myUserId`)
+- [ ] **No raw IDs** — UI shows human-readable content (message text, user name), never UUIDs
+- [ ] **Real-time state displayed** — if backend sends WS event, frontend renders it visibly (not just tracked in JS)
 - [ ] UI trigger (button/panel) added in sidebar or topbar
 - [ ] Message rendering updated if message display changes
 - [ ] Toast notifications for success/error
 - [ ] Activity log entries (automatic via `api()`)
 - [ ] No XSS — all user content escaped
+- [ ] **Browser API guards** — `typeof Notification`, `navigator.clipboard` checks before use
+- [ ] **Browser tests written** — covering: no raw IDs, no double-count, cross-user WS, visible state display

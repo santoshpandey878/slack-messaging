@@ -467,17 +467,26 @@ REACTION=$(curl -s -X POST "http://localhost:8083/api/v1/channels/$CH_ID/message
 check "$REACTION" "Add reaction"
 ```
 
-### Step 12b: Write Browser Tests (MANDATORY for UI-visible features — DO NOT SKIP)
+### Step 12b: Write Browser Tests (MANDATORY — BLOCKS COMMIT)
 
 **File:** Add test spec to `tests/browser/specs/{feature}.spec.js`
 
-Browser tests run real Chromium via Playwright in Docker. They catch WS/UI bugs that curl tests cannot. **You MUST write browser tests for every feature that touches the frontend.** This is not optional — skipping this step has caused production bugs.
+Browser tests run real Chromium via Playwright in Docker. They catch WS/UI bugs that curl tests cannot.
+
+**THIS STEP BLOCKS COMMIT.** Do NOT proceed to Step 13 (frontend) or Step 14 (build) until browser tests are written. The tests are written ALONGSIDE the feature code, not as an afterthought. If you skip this step and commit without browser tests, the feature WILL have UI bugs that only surface during the demo.
 
 **You MUST add browser tests when:**
 - Feature has frontend UI changes
 - Feature uses WebSocket events
 - Feature involves multi-user interaction (reactions, threads, typing, presence)
 - Feature displays counts, badges, or state that could double-count
+- Feature renders data from API (verify it shows human-readable content, not raw IDs)
+
+**Every browser test MUST verify:**
+1. The feature works for the acting user (no double-count from WS echo)
+2. The feature shows human-readable content (no raw UUIDs, no missing data)
+3. If real-time: other users see the correct update via WebSocket
+4. If the backend tracks state (presence, typing): the frontend DISPLAYS it visibly
 
 **Test pattern:**
 ```javascript
