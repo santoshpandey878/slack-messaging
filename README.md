@@ -56,13 +56,6 @@ A production-grade, multi-tenant, real-time messaging platform built with hexago
 | Real-time messaging via WebSocket | Live | message-service + ws-gateway |
 | Message history (cursor pagination) | Live | message-service |
 | Message idempotency (duplicate prevention) | Live | message-service |
-| Threads / Replies | Live | message-service |
-| Emoji Reactions (add/remove/toggle) | Live | message-service |
-| Pinned Messages (pin/unpin/list) | Live | message-service |
-| Message Search (per-channel) | Live | message-service |
-| Typing Indicators ("X is typing...") | Live | ws-gateway |
-| User Presence (online/offline) | Live | ws-gateway |
-| Browser Notifications | Live | frontend (Notification API) |
 | Unread counts with badges | Live | message-service + frontend |
 | Media upload via presigned URLs | Live | media-service |
 | Cross-tenant isolation | Live | all services |
@@ -97,45 +90,7 @@ A production-grade, multi-tenant, real-time messaging platform built with hexago
 1. Click the paperclip icon in the composer
 2. Select an image file — it uploads via presigned URL and appears in the chat
 
-### 6. Threads (Replies)
-1. Send a message in a channel
-2. Click **Reply** on any message — thread panel opens on the right
-3. Type a reply and click **Reply** — it appears in the thread panel
-4. The parent message shows "1 reply" indicator
-5. In a second tab (User B), the reply count updates in real-time
-
-### 7. Reactions (Emoji)
-1. Click **React** on any message — emoji picker appears
-2. Click an emoji — reaction badge appears below the message with count
-3. Click the badge again to remove your reaction
-4. In a second tab (User B), add a different emoji — both users see both reactions
-
-### 8. Pinned Messages
-1. Click **Pin** on any message — toast shows "Message pinned"
-2. Click **Pins** in the top bar — shows list of pinned messages
-3. Click **Unpin** to remove a pin
-
-### 9. Message Search
-1. Click **Search** in the top bar — search bar appears
-2. Type a keyword and press Enter — matching messages from the current channel are shown
-3. Click **Close** to dismiss search results and return to normal history
-
-### 10. Typing Indicators
-1. Open two browser tabs with different users in the same channel
-2. Start typing in User A's tab — User B sees "Admin is typing..."
-3. The indicator auto-hides after 5 seconds of inactivity
-
-### 11. User Presence
-1. When a user connects via WebSocket, their status broadcasts as "online"
-2. When they disconnect (close tab), status broadcasts as "offline"
-3. Presence events are delivered to all users in the same tenant
-
-### 12. Browser Notifications
-1. Allow notifications when prompted (or click the browser permissions)
-2. Minimize the browser tab
-3. Another user sends a message — a desktop notification pops up with the sender name and message content
-
-### 13. Cross-Tenant Isolation
+### 6. Cross-Tenant Isolation
 1. Register a second workspace with a different slug
 2. Try to access the first workspace's channels — should be blocked
 

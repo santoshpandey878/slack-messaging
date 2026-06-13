@@ -20,6 +20,16 @@ import java.net.URI;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * WebSocket handler — thin orchestrator.
+ * Delegates: session mgmt -> WsSessionManager, message building -> WsPayloadBuilder.
+ *
+ * Supports ANY event type via the generic envelope:
+ * { "type": "...", "tenantId": "...", "channelId": "...", "data": {...} }
+ *
+ * Channel-scoped events: delivered to channel members only.
+ * Tenant-scoped events (channelId=null): delivered to all online tenant users.
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -42,21 +52,9 @@ public class WsHandler extends TextWebSocketHandler {
             return;
         }
 
-        UUID tenantId = jwtUtil.getTenantId(token);
-        UUID userId = jwtUtil.getUserId(token);
-        String displayName = jwtUtil.getDisplayName(token);
-
-        sessionManager.register(tenantId, userId, session);
+        sessionManager.register(jwtUtil.getTenantId(token), jwtUtil.getUserId(token), session);
         ensureServerSubscribed();
         send(session, "{\"type\":\"connected\",\"serverId\":\"" + sessionManager.getServerId() + "\"}");
-
-        // Presence: broadcast online status with display name
-        try {
-            String payload = WsPayloadBuilder.buildPresenceChange(tenantId, userId, "online", displayName, objectMapper);
-            deliverToTenantMembers(tenantId.toString(), payload);
-        } catch (Exception e) {
-            log.debug("Presence online fanout failed: {}", e.getMessage());
-        }
     }
 
     @Override
@@ -71,7 +69,6 @@ public class WsHandler extends TextWebSocketHandler {
             switch (type) {
                 case "ping": send(session, "{\"type\":\"pong\"}"); break;
                 case "sync": handleSync(session, json, userKey); break;
-                case "typing": handleTyping(json, userKey); break;
                 default: send(session, "{\"type\":\"error\",\"message\":\"Unknown type\"}");
             }
         } catch (Exception e) {
@@ -82,59 +79,12 @@ public class WsHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        String userKey = sessionManager.getUserKey(session.getId());
         sessionManager.unregister(session);
-
-        // Presence: broadcast offline status
-        if (userKey != null) {
-            try {
-                String[] parts = userKey.split(":", 2);
-                UUID tenantId = UUID.fromString(parts[0]);
-                UUID userId = UUID.fromString(parts[1]);
-                String payload = WsPayloadBuilder.buildPresenceChange(tenantId, userId, "offline", objectMapper);
-                deliverToTenantMembers(tenantId.toString(), payload);
-            } catch (Exception e) {
-                log.debug("Presence offline fanout failed: {}", e.getMessage());
-            }
-        }
     }
 
     @Override
     public void handleTransportError(WebSocketSession session, Throwable ex) {
         log.error("WS transport error: {}", ex.getMessage());
-    }
-
-    // ═══ Typing ═══
-
-    private void handleTyping(JsonNode json, String userKey) {
-        String chId = json.path("channelId").asText("");
-        if (chId.isEmpty()) return;
-
-        try {
-            String[] parts = userKey.split(":", 2);
-            UUID tenantId = UUID.fromString(parts[0]);
-            UUID userId = UUID.fromString(parts[1]);
-
-            if (!channelService.isMember(UUID.fromString(chId), userId)) return;
-
-            String displayName = json.path("displayName").asText("Someone");
-            String payload = WsPayloadBuilder.buildTypingStart(tenantId, UUID.fromString(chId), userId, displayName, objectMapper);
-
-            // Fan out to channel members directly (skip Redis pub/sub for ephemeral events)
-            for (Map.Entry<String, WebSocketSession> entry : sessionManager.getAllSessions().entrySet()) {
-                String key = entry.getKey();
-                WebSocketSession s = entry.getValue();
-                if (!s.isOpen() || !key.startsWith(parts[0] + ":") || key.equals(userKey)) continue;
-                String uid = key.substring(parts[0].length() + 1);
-                try {
-                    if (channelService.isMember(UUID.fromString(chId), UUID.fromString(uid))) {
-                        send(s, payload);
-                    }
-                } catch (Exception e) { /* skip */ }
-            }
-        } catch (Exception e) {
-            log.debug("Typing fanout failed: {}", e.getMessage());
-        }
     }
 
     // ═══ Sync ═══
@@ -144,8 +94,9 @@ public class WsHandler extends TextWebSocketHandler {
         if (channels == null || !channels.isObject()) return;
 
         UUID tenantId;
-        try { tenantId = UUID.fromString(userKey.split(":", 2)[0]); }
-        catch (Exception e) { return; }
+        try {
+            tenantId = UUID.fromString(userKey.split(":", 2)[0]);
+        } catch (Exception e) { return; }
 
         channels.fields().forEachRemaining(entry -> {
             try {
@@ -173,11 +124,14 @@ public class WsHandler extends TextWebSocketHandler {
                     JsonNode json = objectMapper.readTree(message);
                     String targetTenantId = json.path("tenantId").asText("");
                     String targetChannelId = json.path("channelId").asText("");
+
                     if (targetTenantId.isEmpty()) return;
 
                     if (targetChannelId.isEmpty() || "null".equals(targetChannelId)) {
+                        // Tenant-scoped event (e.g., presence) — deliver to all tenant sessions
                         deliverToTenantMembers(targetTenantId, message);
                     } else {
+                        // Channel-scoped event — deliver to channel members only
                         deliverToChannelMembers(targetTenantId, targetChannelId, message);
                     }
                 } catch (Exception e) {
@@ -192,7 +146,9 @@ public class WsHandler extends TextWebSocketHandler {
         for (Map.Entry<String, WebSocketSession> entry : sessionManager.getAllSessions().entrySet()) {
             String userKey = entry.getKey();
             WebSocketSession session = entry.getValue();
+
             if (!session.isOpen() || !userKey.startsWith(tenantId + ":")) continue;
+
             String userId = userKey.substring(tenantId.length() + 1);
             try {
                 if (channelService.isMember(UUID.fromString(channelId), UUID.fromString(userId))) {
@@ -206,8 +162,12 @@ public class WsHandler extends TextWebSocketHandler {
 
     private void deliverToTenantMembers(String tenantId, String message) {
         for (Map.Entry<String, WebSocketSession> entry : sessionManager.getAllSessions().entrySet()) {
-            if (!entry.getValue().isOpen() || !entry.getKey().startsWith(tenantId + ":")) continue;
-            send(entry.getValue(), message);
+            String userKey = entry.getKey();
+            WebSocketSession session = entry.getValue();
+
+            if (!session.isOpen() || !userKey.startsWith(tenantId + ":")) continue;
+
+            send(session, message);
         }
     }
 
@@ -217,12 +177,16 @@ public class WsHandler extends TextWebSocketHandler {
         URI uri = session.getUri();
         if (uri == null || uri.getQuery() == null) return null;
         return Arrays.stream(uri.getQuery().split("&"))
-                .filter(p -> p.startsWith("token=")).map(p -> p.substring(6)).findFirst().orElse(null);
+                .filter(p -> p.startsWith("token="))
+                .map(p -> p.substring(6))
+                .findFirst().orElse(null);
     }
 
     private void send(WebSocketSession session, String payload) {
         try {
-            if (session.isOpen()) { synchronized (session) { session.sendMessage(new TextMessage(payload)); } }
+            if (session.isOpen()) {
+                synchronized (session) { session.sendMessage(new TextMessage(payload)); }
+            }
         } catch (IOException e) {
             log.error("WS send failed: {}", e.getMessage());
             try { session.close(CloseStatus.SERVER_ERROR); } catch (IOException ex) { /* ignore */ }
