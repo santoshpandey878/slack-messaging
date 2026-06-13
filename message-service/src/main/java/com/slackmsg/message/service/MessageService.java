@@ -38,7 +38,7 @@ public class MessageService implements MessageServicePort {
 
     @javax.annotation.PostConstruct
     void onStartup() {
-        log.info("MessageService initialized — pipeline verified");
+        log.info("MessageService initialized — ready for Harinder demo");
     }
 
     @Transactional
