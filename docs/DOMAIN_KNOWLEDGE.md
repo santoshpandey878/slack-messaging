@@ -576,3 +576,72 @@ External services can send messages to channels via webhook URLs. Similar to Sla
 - Tokens should be long random strings (UUID v4)
 - HTTPS in production (webhook URL contains the secret)
 - Optional: HMAC signature verification for outgoing webhooks
+
+---
+
+## Unknown / New Feature (not listed above)
+
+If Harinder requests a feature NOT documented above, the agent MUST NOT guess or improvise blindly. Follow this structured approach to reason through the feature before writing any code.
+
+### Step 1: Define What It Is
+- What does this feature do in Slack? (Claude has knowledge of Slack's behavior)
+- Is it user-facing or system-internal?
+- Which service owns it? (auth, channel, message, media, ws-gateway)
+- Is it real-time (needs WS event) or REST-only?
+
+### Step 2: Define the Data Model
+Ask these questions:
+- Does it need a **new table**? → Define columns, types, constraints, indexes. Always include `tenant_id`.
+- Does it need **new columns on existing tables**? → Use `ALTER TABLE ADD COLUMN IF NOT EXISTS`. Check DATABASE.md for existing columns first.
+- Does it need **a new entity** in common/? → Follow the Entity Pattern in DATABASE.md.
+- Is data **persistent** (DB) or **ephemeral** (Redis-only, like typing/presence)?
+- What is the **unique constraint**? (prevents duplicates — e.g., one reaction per user per emoji per message)
+
+### Step 3: Define API Endpoints
+Follow API_DESIGN.md conventions:
+- **Path pattern:** `/api/v1/channels/{channelId}/{resource}` for channel-scoped, `/api/v1/{resource}` for user-scoped
+- **Methods:** POST (create), GET (read), PATCH (update), DELETE (remove)
+- **Request DTO:** `{Action}{Feature}Request.java` in common/dto/request/ with `@NotBlank`, `@Size` validation
+- **Response DTO:** `{Feature}Response.java` in common/dto/response/ with `@JsonInclude(NON_NULL)` and `from(Entity)` factory
+- **Response wrapper:** Always `ApiResponse<T>`
+- **Gateway routing:** Does `/channels/{id}/{resource}` need a new routing rule in ServiceRoutes? (Default goes to channel-service — add regex for message-service if needed)
+
+### Step 4: Define Edge Cases
+Always consider these for ANY feature:
+- **Not a member:** Block with SecurityException
+- **Resource not found:** Block with IllegalArgumentException
+- **Deleted/archived resource:** Block writes, allow reads where appropriate
+- **Duplicate operation:** Handle via UNIQUE constraint + catch DataIntegrityViolationException
+- **Race condition:** Use atomic SQL (`SET count = count + 1`), never read-modify-write
+- **Cross-tenant access:** All queries MUST include tenant_id
+- **Fan-out failure:** Wrap in try-catch, never fail the main operation
+- **Empty/null input:** Validate in DTO with annotations, handle nulls in service
+
+### Step 5: Define WS Events (if real-time)
+- Does this feature need real-time push to other users?
+- If yes: check if WsEventType enum already has a suitable type. If not, add one.
+- Check if WsPayloadBuilder already has a builder. If not, add one.
+- Use `fanoutService.fanoutEvent()` for channel-scoped, `fanoutToTenant()` for tenant-scoped
+- **Sender Echo Rule:** Frontend WS handler MUST skip sender's own events
+
+### Step 6: Define Authorization
+Refer to TRADEOFFS.md authorization model:
+- Who can perform this action? (any member, sender only, admin only)
+- Check membership via `channelService.isMember()`
+- Check admin via `AuthorizationService.requireChannelAdminOrTenantAdmin()`
+- Check ownership via `entity.getUserId().equals(TenantContext.getUserId())`
+
+### Step 7: Build It
+Now follow FEATURE_WORKFLOW.md from Step 1. All patterns, conventions, and infrastructure are in place. The feature plugs into existing architecture — don't invent new patterns.
+
+### Example: Reasoning Through "Message Bookmarks with Tags"
+
+If Harinder says "build message bookmarks where users can tag bookmarks with custom labels":
+
+1. **What is it:** Personal bookmarks (like stars) but with user-defined tags. User-scoped, not channel-scoped.
+2. **Data model:** New table `bookmarks` (id, tenant_id, user_id, message_id, channel_id, tag VARCHAR(50), created_at). UNIQUE(user_id, message_id, tag). Or extend existing `starred_items` table with a `tag` column.
+3. **Endpoints:** POST `/api/v1/bookmarks`, GET `/api/v1/bookmarks?tag=important`, DELETE `/api/v1/bookmarks/{id}`. User-scoped (no channel prefix).
+4. **Edge cases:** Bookmark deleted message → allow (personal). Duplicate tag → UNIQUE constraint. Empty tag → default to "starred".
+5. **WS events:** None — bookmarks are personal, no need to notify others.
+6. **Auth:** Self only — user can only see/manage their own bookmarks.
+7. **Build:** Follow FEATURE_WORKFLOW.md steps 1-20.
