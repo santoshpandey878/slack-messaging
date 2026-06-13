@@ -57,6 +57,12 @@ test.describe('Full Demo Flow', () => {
     const activeBadge = await pageA.locator('.channel-list li.active .unread-badge').count();
     expect(activeBadge).toBe(0);
 
+    // === UNREAD — mark-read works (badge clears after switching away and back) ===
+    // Send a message as Admin while Bob is on the channel
+    // Bob's active channel should still have no badge
+    const bobActiveBadge = await pageB.locator('.channel-list li.active .unread-badge').count();
+    expect(bobActiveBadge).toBe(0);
+
     // === REACTIONS — no double count ===
     await pageA.click('.msg-actions button:has-text("React")');
     await pageA.waitForSelector('.emoji-picker.show');

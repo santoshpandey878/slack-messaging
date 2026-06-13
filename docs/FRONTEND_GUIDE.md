@@ -260,6 +260,17 @@ These rules exist because every one of them was violated and caught during testi
 - **Reactions:** Must show emoji badges — not just store counts.
 - **Unread:** Must show badge on channel — not just increment a counter.
 
+### No Docker-Internal Hostnames in URLs
+- URLs sent to the frontend (presigned upload/read URLs, media URLs, webhook URLs) MUST use `localhost` or the public hostname, NEVER Docker service names (`minio:9000`, `redis:6379`).
+- The browser runs OUTSIDE Docker — it cannot resolve Docker-internal hostnames.
+- Presigned URLs include the hostname in the HMAC signature — rewriting hostname client-side breaks the signature and causes `SignatureDoesNotMatch` errors.
+- **Fix at the backend config level** (e.g., `STORAGE_PUBLIC_ENDPOINT`), never in the frontend.
+
+### API Responses Must Handle Null Optional Fields
+- If the frontend sends `null` for optional fields in a request body, the backend must accept it.
+- Never assume the frontend will always populate every field. Test with `null` values.
+- Example: `MarkReadRequest.lastReadMessageId` was `@NotNull` → mark-read silently failed → unread badges never cleared.
+
 ### Browser API Guards
 - **Notifications:** Require `Notification.requestPermission()` called during a user gesture (login click). Always check `typeof Notification !== 'undefined'` before using — Playwright/headless browsers may not support it.
 - **Clipboard:** Guard with `navigator.clipboard` check.

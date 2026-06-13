@@ -200,9 +200,30 @@ Every edge case in this document MUST be handled. The agent must consult this be
 - Client requests URL for "image/jpeg" but uploads "application/exe".
 - MinIO/S3 enforces the content-type from the presigned URL. Mismatch = upload fails.
 
+### Presigned URL Hostname Mismatch (CRITICAL — caused production bug)
+- **Scenario:** Presigned URLs generated with Docker-internal hostname (`minio:9000`). Browser can't reach Docker hostnames.
+- **Symptom:** `SignatureDoesNotMatch` error when opening/uploading files. Images don't load.
+- **Root cause:** Presigned URL signature includes the hostname. Rewriting hostname client-side breaks the signature.
+- **Solution:** Use separate `STORAGE_PUBLIC_ENDPOINT` config for URLs sent to browser. Generate presigned URLs with the public endpoint so signature matches.
+- **Rule:** NEVER rewrite presigned URL hostnames in the frontend. Fix at the source (backend config).
+
 ---
 
-## 9. Multi-Service Failure Scenarios
+## 9. Unread Count Edge Cases
+
+### Mark-Read with Null Fields
+- **Scenario:** Frontend calls `POST /read` with `{lastReadMessageId: null}`. Backend has `@NotNull` validation.
+- **Symptom:** Mark-read silently fails. Unread badge never clears. User sees stale count on active channel.
+- **Solution:** Make `lastReadMessageId` optional. UnreadService only needs channelId to reset count.
+- **Rule:** Never use `@NotNull` on DTO fields that the frontend may not populate. Test API with null optionals.
+
+### Unread on Active Channel
+- **Scenario:** User has channel open. Another user sends message. Unread count shows on the active channel.
+- **Solution:** `selectChannel()` must `await` the mark-read API before refreshing channel list. Active channel never shows badge regardless of Redis state.
+
+---
+
+## 10. Multi-Service Failure Scenarios
 
 | Failure | Impact | Handling |
 |---------|--------|----------|
